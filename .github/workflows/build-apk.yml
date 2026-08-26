@@ -1,11 +1,11 @@
-name: Build DINAL StoreHub V7 APK
+name: Build DINAL StoreHub V8 APK
 
 on:
   workflow_dispatch:
   push:
     branches: [ main, master ]
     paths:
-      - 'storehub-v7-source.zip'
+      - 'storehub-v8-source.zip'
       - '.github/workflows/build-apk.yml'
 
 jobs:
@@ -15,12 +15,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Extract V7 source
+      - name: Extract V8 source
         run: |
-          rm -rf v7
-          mkdir -p v7
-          unzip -q -o storehub-v7-source.zip -d v7
-          test -f v7/StoreHubAndroid/app/build.gradle.kts
+          rm -rf v8
+          mkdir -p v8
+          unzip -q -o storehub-v8-source.zip -d v8
+          test -f v8/StoreHubAndroid/app/build.gradle.kts
+          grep -q 'versionName = "8.0.0"' v8/StoreHubAndroid/app/build.gradle.kts
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -42,15 +43,15 @@ jobs:
           gradle-version: '8.9'
 
       - name: Build APK
-        working-directory: v7/StoreHubAndroid
+        working-directory: v8/StoreHubAndroid
         run: gradle :app:assembleDebug --stacktrace
 
       - name: Prepare APK
-        run: cp v7/StoreHubAndroid/app/build/outputs/apk/debug/app-debug.apk DINAL-StoreHub-V7.apk
+        run: cp v8/StoreHubAndroid/app/build/outputs/apk/debug/app-debug.apk DINAL-StoreHub-V8.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: DINAL-StoreHub-V7-APK
-          path: DINAL-StoreHub-V7.apk
+          name: DINAL-StoreHub-V8-APK
+          path: DINAL-StoreHub-V8.apk
           if-no-files-found: error
