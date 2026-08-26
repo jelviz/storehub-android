@@ -1,0 +1,36 @@
+package ir.dinal.storehub.ui
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.navigation.NavHostController
+import ir.dinal.storehub.data.*
+import kotlinx.coroutines.launch
+
+@Composable fun ChecksScreen(nav:NavHostController){val ctx=LocalContext.current;val store=remember{LocalStore.get(ctx)};val scope=rememberCoroutineScope();var list by remember{mutableStateOf<List<IssuedCheckEntity>>(emptyList())};var title by remember{mutableStateOf("")};var bank by remember{mutableStateOf("")};var number by remember{mutableStateOf("")};var payee by remember{mutableStateOf("")};var amount by remember{mutableStateOf("")};var due by remember{mutableStateOf(todayPersian())};var reminder by remember{mutableStateOf("3")};var note by remember{mutableStateOf("")};var err by remember{mutableStateOf<String?>(null)}
+    suspend fun load(){list=store.checks()};LaunchedEffect(Unit){load()}
+    Shell(nav,"چک‌ها و سررسید"){
+        Card{Column(Modifier.padding(10.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){Text("ثبت چک صادرشده",fontWeight=FontWeight.Bold);OutlinedTextField(title,{title=it},label={Text("عنوان")},modifier=Modifier.fillMaxWidth());OutlinedTextField(bank,{bank=it},label={Text("بانک")},modifier=Modifier.fillMaxWidth());OutlinedTextField(number,{number=it},label={Text("شماره چک")},modifier=Modifier.fillMaxWidth());OutlinedTextField(payee,{payee=it},label={Text("در وجه")},modifier=Modifier.fillMaxWidth());OutlinedTextField(amount,{amount=it},label={Text("مبلغ")},modifier=Modifier.fillMaxWidth());OutlinedTextField(due,{due=it},label={Text("سررسید شمسی؛ مثال 1405/06/15")},modifier=Modifier.fillMaxWidth());OutlinedTextField(reminder,{reminder=it},label={Text("چند روز قبل یادآوری شود")},modifier=Modifier.fillMaxWidth());OutlinedTextField(note,{note=it},label={Text("توضیح")},modifier=Modifier.fillMaxWidth());Button({scope.launch{runCatching{store.saveCheck(title=title,bank=bank,number=number,payee=payee,amount=amount.toDoubleOrNull()?:0.0,duePersian=due,reminderDays=reminder.toIntOrNull()?:3,note=note)}.onSuccess{title="";bank="";number="";payee="";amount="";note="";load()}.onFailure{err=it.message}}},enabled=title.isNotBlank(),modifier=Modifier.fillMaxWidth()){Text("ثبت چک")}}}
+        ErrorText(err)
+        LazyColumn(Modifier.weight(1f)){items(list,key={it.id}){c->Card(Modifier.fillMaxWidth().padding(vertical=3.dp)){Column(Modifier.padding(10.dp)){Text(c.title,fontWeight=FontWeight.Bold);Text("${c.dueDatePersian} | ${money(c.amount)} | ${c.bankName?:""}");Text("وضعیت: ${when(c.status){1->"باز";2->"پاس‌شده";3->"برگشتی";4->"لغوشده";else->"نامشخص"}}");if(c.status==1)Row{TextButton({scope.launch{store.setCheckStatus(c.id,2);load()}}){Text("پاس شد")};TextButton({scope.launch{store.setCheckStatus(c.id,3);load()}}){Text("برگشت خورد")};TextButton({scope.launch{store.setCheckStatus(c.id,4);load()}}){Text("لغو")}}}}}}
+    }
+}
+
+@Composable fun AppointmentsScreen(nav:NavHostController){val ctx=LocalContext.current;val store=remember{LocalStore.get(ctx)};val scope=rememberCoroutineScope();var list by remember{mutableStateOf<List<AppointmentEntity>>(emptyList())};var title by remember{mutableStateOf("")};var person by remember{mutableStateOf("")};var mobile by remember{mutableStateOf("")};var location by remember{mutableStateOf("")};var date by remember{mutableStateOf(todayPersian())};var time by remember{mutableStateOf("12:00")};var reminder by remember{mutableStateOf("60")};var note by remember{mutableStateOf("")};var err by remember{mutableStateOf<String?>(null)}
+    suspend fun load(){list=store.appointments()};LaunchedEffect(Unit){load()}
+    Shell(nav,"قرار ملاقات‌ها"){
+        Card{Column(Modifier.padding(10.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){Text("قرار جدید",fontWeight=FontWeight.Bold);OutlinedTextField(title,{title=it},label={Text("عنوان")},modifier=Modifier.fillMaxWidth());OutlinedTextField(person,{person=it},label={Text("نام شخص")},modifier=Modifier.fillMaxWidth());OutlinedTextField(mobile,{mobile=it},label={Text("موبایل")},modifier=Modifier.fillMaxWidth());OutlinedTextField(location,{location=it},label={Text("محل")},modifier=Modifier.fillMaxWidth());OutlinedTextField(date,{date=it},label={Text("تاریخ شمسی")},modifier=Modifier.fillMaxWidth());OutlinedTextField(time,{time=it},label={Text("ساعت 24 ساعته؛ مثال 14:30")},modifier=Modifier.fillMaxWidth());OutlinedTextField(reminder,{reminder=it},label={Text("یادآوری چند دقیقه قبل")},modifier=Modifier.fillMaxWidth());OutlinedTextField(note,{note=it},label={Text("توضیح")},modifier=Modifier.fillMaxWidth());Button({scope.launch{runCatching{store.saveAppointment(title=title,person=person,mobile=mobile,location=location,datePersian=date,time=time,reminderMinutes=reminder.toIntOrNull()?:60,note=note)}.onSuccess{title="";person="";mobile="";location="";note="";load()}.onFailure{err=it.message}}},enabled=title.isNotBlank(),modifier=Modifier.fillMaxWidth()){Text("ثبت قرار")}}}
+        ErrorText(err)
+        LazyColumn(Modifier.weight(1f)){items(list,key={it.id}){a->Card(Modifier.fillMaxWidth().padding(vertical=3.dp)){Column(Modifier.padding(10.dp)){Text(a.title,fontWeight=FontWeight.Bold);Text("${a.datePersian} ساعت ${a.time}");Text(listOfNotNull(a.personName,a.location).joinToString(" | "));Text("وضعیت: ${if(a.status==1)"فعال" else "انجام‌شده"}");if(a.status==1)TextButton({scope.launch{store.setAppointmentStatus(a.id,2);load()}}){Text("انجام شد")}}}}}
+    }
+}
+
+@Composable fun CalendarScreen(nav:NavHostController){val ctx=LocalContext.current;val store=remember{LocalStore.get(ctx)};val now=remember{Jalali.today()};var y by remember{mutableIntStateOf(now.year)};var m by remember{mutableIntStateOf(now.month)};var data by remember{mutableStateOf<CalendarDataLocal?>(null)};LaunchedEffect(y,m){data=store.calendar(y,m)}
+    Shell(nav,"تقویم شمسی"){Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Button({if(m==1){m=12;y--}else m--}){Text("ماه قبل")};Text("$y/${m.toString().padStart(2,'0')}",style=MaterialTheme.typography.titleLarge);Button({if(m==12){m=1;y++}else m++}){Text("ماه بعد")}};val days=if(m<=6)31 else if(m<=11)30 else 30;LazyColumn(Modifier.weight(1f)){items((1..days).toList()){day->val suffix="/${day.toString().padStart(2,'0')}";val cs=data?.checks?.filter{it.dueDatePersian.endsWith(suffix)}.orEmpty();val ap=data?.appointments?.filter{it.datePersian.endsWith(suffix)}.orEmpty();val ps=data?.purchases?.filter{it.purchaseDatePersian.endsWith(suffix)}.orEmpty();Card(Modifier.fillMaxWidth().padding(vertical=2.dp)){Column(Modifier.padding(8.dp)){Text(day.toString(),fontWeight=FontWeight.Bold);cs.forEach{Text("چک: ${it.title} — ${money(it.amount)}")};ap.forEach{Text("قرار: ${it.title} — ${it.time}")};ps.forEach{Text("خرید: ${it.purchaseNo} — ${money(it.total)}")};if(cs.isEmpty()&&ap.isEmpty()&&ps.isEmpty())Text("—",style=MaterialTheme.typography.bodySmall)}}}}}
+}
