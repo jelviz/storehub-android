@@ -8,6 +8,7 @@ plugins {
 android {
     namespace = "ir.dinal.storehub"
     compileSdk = 35
+
     defaultConfig {
         applicationId = "ir.dinal.storehub"
         minSdk = 26
@@ -15,16 +16,32 @@ android {
         versionCode = 6
         versionName = "6.0.0-local"
     }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
     buildFeatures { compose = true }
+
     buildTypes {
         release {
             isMinifyEnabled = false
         }
     }
-    packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+
+    packaging {
+        resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    }
 }
 
-kapt { correctErrorTypes = true }
+kotlin {
+    jvmToolchain(17)
+}
+
+kapt {
+    correctErrorTypes = true
+}
 
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
