@@ -1,11 +1,11 @@
-name: Build DINAL StoreHub V10 APK
+name: Build DINAL StoreHub V13 APK
 
 on:
   workflow_dispatch:
   push:
     branches: [ main, master ]
     paths:
-      - 'storehub-v10-source.zip'
+      - 'storehub-v13-source.zip'
       - '.github/workflows/build-apk.yml'
 
 jobs:
@@ -15,14 +15,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Extract V10 source
+      - name: Extract V13 source and verify features
         run: |
-          rm -rf v10
-          mkdir -p v10
-          unzip -q -o storehub-v10-source.zip -d v10
-          test -f v10/StoreHubAndroid/app/build.gradle.kts
-          grep -q 'versionName = "10.0.0"' v10/StoreHubAndroid/app/build.gradle.kts
-          grep -q 'Build DINAL StoreHub V10 APK' v10/StoreHubAndroid/.github/workflows/build-apk.yml
+          rm -rf v13
+          mkdir -p v13
+          unzip -q -o storehub-v13-source.zip -d v13
+          test -f v13/StoreHubAndroid/app/build.gradle.kts
+          grep -q 'versionName = "13.0.0"' v13/StoreHubAndroid/app/build.gradle.kts
+          grep -q 'versionCode = 13' v13/StoreHubAndroid/app/build.gradle.kts
+          grep -q 'fun DinalSplashScreen' v13/StoreHubAndroid/app/src/main/java/ir/dinal/storehub/ui/SplashScreen.kt
+          grep -q 'DINALKADO.COM' v13/StoreHubAndroid/app/src/main/java/ir/dinal/storehub/ui/SplashScreen.kt
+          grep -q 'fun SmartProductScreen' v13/StoreHubAndroid/app/src/main/java/ir/dinal/storehub/ui/SmartProduct.kt
+          grep -q 'fun MoneyTextField' v13/StoreHubAndroid/app/src/main/java/ir/dinal/storehub/ui/Common.kt
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -43,16 +47,40 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build APK
-        working-directory: v10/StoreHubAndroid
-        run: gradle :app:assembleDebug --stacktrace
+      - name: Validate permanent signing secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64" || (echo "Missing ANDROID_KEYSTORE_BASE64" && exit 1)
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || (echo "Missing ANDROID_KEYSTORE_PASSWORD" && exit 1)
+          test -n "$ANDROID_KEY_ALIAS" || (echo "Missing ANDROID_KEY_ALIAS" && exit 1)
+          test -n "$ANDROID_KEY_PASSWORD" || (echo "Missing ANDROID_KEY_PASSWORD" && exit 1)
+
+      - name: Restore permanent signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > v13/StoreHubAndroid/app/storehub-release.jks
+          keytool -list -keystore v13/StoreHubAndroid/app/storehub-release.jks -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >/dev/null
+
+      - name: Build signed release APK
+        working-directory: v13/StoreHubAndroid
+        env:
+          ANDROID_KEYSTORE_PATH: storehub-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle :app:assembleRelease --stacktrace
 
       - name: Prepare APK
-        run: cp v10/StoreHubAndroid/app/build/outputs/apk/debug/app-debug.apk DINAL-StoreHub-V10.apk
+        run: cp v13/StoreHubAndroid/app/build/outputs/apk/release/app-release.apk DINAL-StoreHub-V13.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: DINAL-StoreHub-V10-APK
-          path: DINAL-StoreHub-V10.apk
+          name: DINAL-StoreHub-V13-APK
+          path: DINAL-StoreHub-V13.apk
           if-no-files-found: error
