@@ -52,19 +52,23 @@ jobs:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           test -n "$ANDROID_KEYSTORE_BASE64" || (echo "Missing ANDROID_KEYSTORE_BASE64" && exit 1)
           test -n "$ANDROID_KEYSTORE_PASSWORD" || (echo "Missing ANDROID_KEYSTORE_PASSWORD" && exit 1)
           test -n "$ANDROID_KEY_ALIAS" || (echo "Missing ANDROID_KEY_ALIAS" && exit 1)
-          test -n "$ANDROID_KEY_PASSWORD" || (echo "Missing ANDROID_KEY_PASSWORD" && exit 1)
 
-      - name: Restore permanent signing key
+      - name: Restore and verify permanent signing key
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > v13/StoreHubAndroid/app/storehub-release.jks
-          keytool -list -keystore v13/StoreHubAndroid/app/storehub-release.jks -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >/dev/null
+          keytool -list \
+            -keystore v13/StoreHubAndroid/app/storehub-release.jks \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" >/dev/null
+          echo "Signing keystore verified."
 
       - name: Build signed release APK
         working-directory: v13/StoreHubAndroid
@@ -72,8 +76,14 @@ jobs:
           ANDROID_KEYSTORE_PATH: storehub-release.jks
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # PKCS12 uses the same password for the private key and keystore.
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: gradle :app:assembleRelease --stacktrace
+
+      - name: Verify APK signature
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          "$APKSIGNER" verify --verbose --print-certs v13/StoreHubAndroid/app/build/outputs/apk/release/app-release.apk
 
       - name: Prepare APK
         run: cp v13/StoreHubAndroid/app/build/outputs/apk/release/app-release.apk DINAL-StoreHub-V13.apk
