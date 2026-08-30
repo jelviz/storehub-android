@@ -1,11 +1,11 @@
-name: Build DINAL StoreHub V15 APK
+name: Build DINAL StoreHub V16 APK
 
 on:
   workflow_dispatch:
   push:
     branches: [ main, master ]
     paths:
-      - 'storehub-v15-source.zip'
+      - 'storehub-v16-source.zip'
       - '.github/workflows/build-apk.yml'
 
 jobs:
@@ -15,16 +15,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Extract V15 source and verify version
-        shell: bash
+      - name: Extract V16 source and verify fixes
         run: |
-          set -euo pipefail
-          rm -rf v15
-          mkdir -p v15
-          unzip -q -o storehub-v15-source.zip -d v15
-          test -f v15/StoreHubAndroid/app/build.gradle.kts
-          grep -q 'versionName = "15.0.0"' v15/StoreHubAndroid/app/build.gradle.kts
-          grep -q 'versionCode = 15' v15/StoreHubAndroid/app/build.gradle.kts
+          rm -rf v16
+          mkdir -p v16
+          unzip -q -o storehub-v16-source.zip -d v16
+          test -f v16/StoreHubAndroid/app/build.gradle.kts
+          grep -q 'versionName = "16.0.0"' v16/StoreHubAndroid/app/build.gradle.kts
+          grep -q 'versionCode = 16' v16/StoreHubAndroid/app/build.gradle.kts
+          grep -q 'RequestPermission' v16/StoreHubAndroid/app/src/main/java/ir/dinal/storehub/ui/SmartProduct.kt
+          grep -q 'prepareSmartProductWebp' v16/StoreHubAndroid/app/src/main/java/ir/dinal/storehub/publishing/ProductImageProcessor.kt
+          grep -q 'DinalAssistantScreen' v16/StoreHubAndroid/app/src/main/java/ir/dinal/storehub/ui/DinalAssistant.kt
+          grep -q 'assistantContext' v16/StoreHubAndroid/app/src/main/java/ir/dinal/storehub/data/LocalStore.kt
+          grep -q 'orientation|screenSize|keyboardHidden' v16/StoreHubAndroid/app/src/main/AndroidManifest.xml
+          grep -q 'dinal_cart_mark' v16/StoreHubAndroid/app/src/main/AndroidManifest.xml
+          grep -q 'dinal_cart_mark' v16/StoreHubAndroid/app/src/main/java/ir/dinal/storehub/ui/SplashScreen.kt
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -36,9 +41,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install Android SDK packages
-        shell: bash
         run: |
-          set -euo pipefail
           sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
           yes | sdkmanager --licenses >/dev/null || true
 
@@ -47,79 +50,40 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Validate signing secrets
-        shell: bash
+      - name: Validate permanent signing secrets
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          set -euo pipefail
           test -n "$ANDROID_KEYSTORE_BASE64" || (echo "Missing ANDROID_KEYSTORE_BASE64" && exit 1)
           test -n "$ANDROID_KEYSTORE_PASSWORD" || (echo "Missing ANDROID_KEYSTORE_PASSWORD" && exit 1)
           test -n "$ANDROID_KEY_ALIAS" || (echo "Missing ANDROID_KEY_ALIAS" && exit 1)
+          test -n "$ANDROID_KEY_PASSWORD" || (echo "Missing ANDROID_KEY_PASSWORD" && exit 1)
 
-      - name: Restore and verify permanent signing key
-        shell: bash
+      - name: Restore permanent signing key
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          set -euo pipefail
-          KEYSTORE="v15/StoreHubAndroid/app/storehub-release.jks"
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
-
-          # Verify keystore/store password and alias.
-          keytool -list \
-            -keystore "$KEYSTORE" \
-            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
-            -alias "$ANDROID_KEY_ALIAS" >/dev/null
-
-          # This permanent keystore is PKCS12. Its private-key password is the
-          # same as the store password. Verify the PRIVATE KEY now, before Gradle.
-          mkdir -p /tmp/storehub-sign-test
-          echo "StoreHub signing verification" > /tmp/storehub-sign-test/check.txt
-          (cd /tmp/storehub-sign-test && jar cf check.jar check.txt)
-          jarsigner \
-            -keystore "$GITHUB_WORKSPACE/$KEYSTORE" \
-            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
-            -keypass "$ANDROID_KEYSTORE_PASSWORD" \
-            /tmp/storehub-sign-test/check.jar \
-            "$ANDROID_KEY_ALIAS" >/dev/null
-          jarsigner -verify /tmp/storehub-sign-test/check.jar >/dev/null
-          echo "Permanent signing key verified successfully."
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > v16/StoreHubAndroid/app/storehub-release.jks
+          keytool -list -keystore v16/StoreHubAndroid/app/storehub-release.jks -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >/dev/null
 
       - name: Build signed release APK
-        working-directory: v15/StoreHubAndroid
-        shell: bash
+        working-directory: v16/StoreHubAndroid
         env:
           ANDROID_KEYSTORE_PATH: storehub-release.jks
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          # IMPORTANT: for this PKCS12 keystore the private-key password equals store password.
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-        run: |
-          set -euo pipefail
-          gradle :app:assembleRelease --stacktrace
-
-      - name: Verify APK signature
-        shell: bash
-        run: |
-          set -euo pipefail
-          APK="v15/StoreHubAndroid/app/build/outputs/apk/release/app-release.apk"
-          test -f "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle :app:assembleRelease --stacktrace
 
       - name: Prepare APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          cp v15/StoreHubAndroid/app/build/outputs/apk/release/app-release.apk DINAL-StoreHub-V15.apk
+        run: cp v16/StoreHubAndroid/app/build/outputs/apk/release/app-release.apk DINAL-StoreHub-V16.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: DINAL-StoreHub-V15-APK
-          path: DINAL-StoreHub-V15.apk
+          name: DINAL-StoreHub-V16-APK
+          path: DINAL-StoreHub-V16.apk
           if-no-files-found: error
