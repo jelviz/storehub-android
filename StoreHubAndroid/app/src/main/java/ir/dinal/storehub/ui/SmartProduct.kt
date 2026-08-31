@@ -433,7 +433,7 @@ fun SmartProductScreen(nav: NavHostController) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                DinalHero("از عکس تا ۳ فروشگاه", "نسخه ۱۶.۳.۰ — اول جستجو در سایت‌های ایرانی، اگر تأیید نکردی با عکس خودت ادامه می‌دهیم") {
+                DinalHero("از عکس تا ۳ فروشگاه", "نسخه ۱۶.۳.۱ — اول جستجو در سایت‌های ایرانی، اگر تأیید نکردی با عکس خودت ادامه می‌دهیم") {
                     Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(42.dp))
                 }
             }

@@ -158,7 +158,7 @@ fun ChecksScreen(nav: NavHostController) {
                         OutlinedTextField(number, { number = it }, label = { Text("شماره چک") }, modifier = Modifier.weight(1f), singleLine = true)
                     }
                     OutlinedTextField(payee, { payee = it }, label = { Text("در وجه") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                    MoneyTextField(amount, { amount = it }, "مبلغ چک", modifier = Modifier.fillMaxWidth(), supportingText = "مثال: 125,000,000 تومان")
+                    MoneyTextField(amount, { amount = it }, "مبلغ چک", modifier = Modifier.fillMaxWidth(), supportingText = "مثال: ۱٬۲۵۰٬۰۰۰ تومان")
                     PersianDateField("تاریخ سررسید", due) { due = it }
                     OutlinedTextField(reminder, { reminder = it }, label = { Text("چند روز قبل اعلان بدهد") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     OutlinedTextField(note, { note = it }, label = { Text("توضیح") }, modifier = Modifier.fillMaxWidth())

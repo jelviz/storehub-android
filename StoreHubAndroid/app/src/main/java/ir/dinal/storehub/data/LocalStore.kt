@@ -6,6 +6,7 @@ import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ir.dinal.storehub.worker.ReminderScheduler
+import ir.dinal.storehub.util.MoneyFormat
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -136,7 +137,7 @@ class LocalStore private constructor(private val context:Context){
         val recentPurchases=purchases().take(10)
         val upcomingAppointments=appointments().filter{it.status==1}.take(10)
 
-        fun money(v:Double)=String.format(java.util.Locale.US,"%,.0f تومان",v)
+        fun money(v:Double)=MoneyFormat.tomanPlain(v)
         return buildString{
             appendLine("تاریخ امروز: ${Jalali.format(Jalali.today())}")
             appendLine("کالاها: ${dash.products} | فعال مغازه: ${dash.storeProducts} | کم‌موجود: ${dash.lowStock} | ناموجود: ${dash.outOfStock}")

@@ -53,7 +53,7 @@ private fun englishDigits(value: String): String = buildString(value.length) {
     }
 }
 
-/** Returns only normalized Latin digits. Money field state stays comma-free. */
+/** Returns only normalized Latin digits. Money field state stays separator-free. */
 private fun normalizeMoneyDigits(value: String): String {
     val digits = englishDigits(value).filter { it.isDigit() }
     if (digits.isBlank()) return ""
@@ -61,17 +61,13 @@ private fun normalizeMoneyDigits(value: String): String {
 }
 
 /** Convenience formatter for non-editable strings. */
-fun formatMoneyInput(value: String): String {
-    val digits = normalizeMoneyDigits(value)
-    if (digits.isBlank()) return ""
-    return digits.reversed().chunked(3).joinToString(",").reversed()
-}
+fun formatMoneyInput(value: String): String = MoneyFormat.groupDigits(normalizeMoneyDigits(value))
 
 fun parseToman(value: String): Double = normalizeMoneyDigits(value).toDoubleOrNull() ?: 0.0
 fun moneyInputFrom(value: Double): String = if (value <= 0.0) "" else value.toLong().toString()
 
 /**
- * Displays thousands separators without inserting commas into the backing text.
+ * Displays thousands separators without inserting them into the backing text.
  * This is important: editing in the middle of an amount keeps the cursor exactly
  * next to the digit the user touched instead of jumping to the end after regrouping.
  */
@@ -79,32 +75,24 @@ private object ThousandsSeparatorTransformation : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
         val raw = text.text
         if (raw.isEmpty()) return TransformedText(text, OffsetMapping.Identity)
-
-        val firstGroup = raw.length % 3.let { if (it == 0) 3 else it }
-        val boundaries = mutableListOf<Int>()
-        var boundary = firstGroup
-        while (boundary < raw.length) {
-            boundaries += boundary
-            boundary += 3
-        }
-
-        val formatted = buildString(raw.length + boundaries.size) {
-            raw.forEachIndexed { index, ch ->
-                if (index in boundaries) append(',')
-                append(ch)
-            }
-        }
-
-        val commaIndices = boundaries.mapIndexed { i, b -> b + i }
+        val formatted = MoneyFormat.groupDigits(raw)
         val mapping = object : OffsetMapping {
-            override fun originalToTransformed(offset: Int): Int {
-                val safe = offset.coerceIn(0, raw.length)
-                return safe + boundaries.count { it < safe }
-            }
+            override fun originalToTransformed(offset: Int): Int =
+                MoneyFormat.groupedOffset(raw.length, offset)
 
             override fun transformedToOriginal(offset: Int): Int {
                 val safe = offset.coerceIn(0, formatted.length)
-                return (safe - commaIndices.count { it < safe }).coerceIn(0, raw.length)
+                var orig = 0
+                var trans = 0
+                while (trans < safe && orig < raw.length) {
+                    if (orig > 0 && (raw.length - orig) % 3 == 0) {
+                        trans++
+                        if (trans >= safe) return orig
+                    }
+                    orig++
+                    trans++
+                }
+                return orig.coerceIn(0, raw.length)
             }
         }
         return TransformedText(AnnotatedString(formatted), mapping)

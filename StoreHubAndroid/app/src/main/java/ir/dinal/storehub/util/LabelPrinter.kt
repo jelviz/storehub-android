@@ -227,5 +227,5 @@ object LabelPrinter {
         }
     }
 
-    private fun formatPrice(value: Double): String = MoneyFormat.toman(value)
+    private fun formatPrice(value: Double): String = MoneyFormat.tomanPlain(value)
 }
