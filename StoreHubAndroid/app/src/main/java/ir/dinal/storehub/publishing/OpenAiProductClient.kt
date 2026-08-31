@@ -5,6 +5,7 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import ir.dinal.storehub.data.ProductAiDraft
+import ir.dinal.storehub.data.ProductSearchHint
 import java.io.File
 import java.util.concurrent.TimeUnit
 import okhttp3.MediaType.Companion.toMediaType
@@ -22,13 +23,20 @@ class OpenAiProductClient(
 
     fun generateDraft(imageFile: File, extraHint: String = ""): ProductAiDraft {
         require(apiKey.isNotBlank()) { "کلید هوش مصنوعی در تنظیمات ثبت نشده است." }
+        return parseDraft(visionText(imageFile, buildPrompt(extraHint)))
+    }
+
+    fun identifySearchQueries(imageFile: File, extraHint: String = ""): ProductSearchHint {
+        require(apiKey.isNotBlank()) { "کلید هوش مصنوعی در تنظیمات ثبت نشده است." }
+        return parseSearchHint(visionText(imageFile, buildIdentifyPrompt(extraHint)))
+    }
+
+    private fun visionText(imageFile: File, prompt: String): String {
         val image64 = Base64.encodeToString(imageFile.readBytes(), Base64.NO_WRAP)
-        val prompt = buildPrompt(extraHint)
-        val text = when (provider.lowercase()) {
+        return when (provider.lowercase()) {
             "gemini" -> gemini(image64, prompt)
             else -> openAiCompatible(image64, prompt, imageFile.name.endsWith(".png", true))
         }
-        return parseDraft(text)
     }
 
     private fun buildPrompt(extraHint: String) = """
@@ -47,6 +55,21 @@ class OpenAiProductClient(
           "seo_description":"متای توضیحات حدود 140 تا 160 کاراکتر",
           "category":"دسته‌بندی پیشنهادی",
           "tags":["برچسب1","برچسب2","برچسب3"]
+        }
+    """.trimIndent()
+
+    private fun buildIdentifyPrompt(extraHint: String) = """
+        از روی تصویر، کالا را برای جستجو در فروشگاه‌های ایرانی (دیجی‌کالا و ترب) تشخیص بده.
+        اگر برند یا مدل روی کالا خوانا است همان را بنویس. حدس بی‌اساس نزن.
+        ${if (extraHint.isBlank()) "" else "راهنمای فروشنده: $extraHint"}
+
+        فقط یک JSON معتبر بدون markdown:
+        {
+          "queries": ["عبارت فارسی جستجو", "English brand model"],
+          "brand": "برند اگر مشخص است",
+          "model": "مدل اگر مشخص است",
+          "persian_name": "نام کوتاه فارسی",
+          "confidence": "high یا medium یا low"
         }
     """.trimIndent()
 
@@ -155,6 +178,23 @@ class OpenAiProductClient(
             seoDescription = o.s("seo_description"),
             category = o.s("category"),
             tags = tags
+        )
+    }
+
+    private fun parseSearchHint(raw: String): ProductSearchHint {
+        val json = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        val start = json.indexOf('{')
+        val end = json.lastIndexOf('}')
+        if (start < 0 || end <= start) return ProductSearchHint()
+        val o = JsonParser.parseString(json.substring(start, end + 1)).asJsonObject
+        val queries = o.getAsJsonArray("queries")?.mapNotNull { runCatching { it.asString.trim() }.getOrNull() }
+            ?.filter { it.length >= 2 } ?: emptyList()
+        return ProductSearchHint(
+            queries = queries.distinct(),
+            brand = o.s("brand"),
+            model = o.s("model"),
+            persianName = o.s("persian_name"),
+            confidence = o.s("confidence").ifBlank { "low" }
         )
     }
 

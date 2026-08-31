@@ -5,9 +5,13 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -27,6 +31,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -34,6 +39,7 @@ import androidx.core.content.FileProvider
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import ir.dinal.storehub.data.*
+import ir.dinal.storehub.publishing.IranianCatalogClient
 import ir.dinal.storehub.publishing.OpenAiProductClient
 import ir.dinal.storehub.publishing.ProductImageProcessor
 import ir.dinal.storehub.publishing.WooPublisher
@@ -186,6 +192,11 @@ fun SmartProductScreen(nav: NavHostController) {
     var error by remember { mutableStateOf<String?>(null) }
     var publishResults by remember { mutableStateOf<List<WooPublishResult>>(emptyList()) }
     var localSaved by rememberSaveable { mutableStateOf(false) }
+    var catalogMatches by remember { mutableStateOf<List<CatalogMatch>>(emptyList()) }
+    var catalogDetail by remember { mutableStateOf<CatalogProductDetail?>(null) }
+    var catalogImageUrl by remember { mutableStateOf<String?>(null) }
+    var catalogAwaiting by remember { mutableStateOf(false) }
+    var searchLabel by remember { mutableStateOf("") }
 
     var sites by remember { mutableStateOf(prefs.sites()) }
     val selectedSites = remember { mutableStateMapOf<Int, Boolean>().apply { sites.forEach { put(it.index, it.enabled && it.baseUrl.isNotBlank()) } } }
@@ -208,7 +219,7 @@ fun SmartProductScreen(nav: NavHostController) {
 
     suspend fun runAi(file: File) {
         if (!prefs.hasOpenAiKey()) {
-            message = "عکس آماده شد. برای تولید خودکار توضیحات، OpenAI API Key را در تنظیمات انتشار وارد کن؛ یا متن‌ها را دستی تکمیل کن."
+            message = listOfNotNull(message, "عکس آماده شد. برای تولید خودکار توضیحات، OpenAI API Key را در تنظیمات انتشار وارد کن؛ یا متن‌ها را دستی تکمیل کن.").joinToString("\n")
             return
         }
         stage = "در حال ساخت عنوان و توضیحات کامل…"
@@ -222,23 +233,134 @@ fun SmartProductScreen(nav: NavHostController) {
         seoDescription = draft.seoDescription
         category = draft.category
         tags = draft.tags.joinToString("، ")
-        message = "پیش‌نویس هوشمند آماده شد؛ قبل از انتشار همه متن‌ها قابل ویرایش‌اند."
+        message = listOfNotNull(message, "پیش‌نویس هوشمند آماده شد؛ قبل از انتشار همه متن‌ها قابل ویرایش‌اند.").joinToString("\n")
+    }
+
+    suspend fun runLocalPipeline(uri: Uri) {
+        catalogAwaiting = false
+        catalogMatches = emptyList()
+        catalogDetail = null
+        stage = "آماده‌سازی عکس و ساخت WebP…"
+        val processed = ProductImageProcessor.prepareProductImage(ctx, uri, threshold.toInt())
+        processedFile = processed.file
+        aiJpegFile = processed.aiJpeg
+        backgroundRemoved = processed.backgroundRemoved
+        runAi(processed.aiJpeg)
+        processed.warning?.let { warning ->
+            message = listOfNotNull(message, warning).joinToString("\n")
+        }
+    }
+
+    suspend fun lookupCatalogThenMaybeLocal(uri: Uri) {
+        stage = "تشخیص کالا از روی عکس…"
+        val jpeg = ProductImageProcessor.jpegForVision(ctx, uri)
+        aiJpegFile = jpeg
+        val queries = ArrayList<String>()
+        extraHint.trim().takeIf { it.isNotBlank() }?.let { queries += it }
+        if (prefs.hasOpenAiKey()) {
+            val hint = runCatching {
+                withContext(Dispatchers.IO) {
+                    OpenAiProductClient(prefs.openAiKey(), prefs.openAiModel, prefs.aiProvider, prefs.openAiBaseUrl)
+                        .identifySearchQueries(jpeg, extraHint)
+                }
+            }.getOrNull()
+            if (hint != null) {
+                queries += hint.queries
+                hint.persianName.takeIf { it.isNotBlank() }?.let { queries += it }
+                val brandModel = listOf(hint.brand, hint.model).filter { it.isNotBlank() }.joinToString(" ")
+                if (brandModel.isNotBlank()) queries += brandModel
+                searchLabel = hint.persianName.ifBlank { hint.queries.firstOrNull().orEmpty() }
+            } else {
+                searchLabel = extraHint.trim()
+            }
+        } else {
+            searchLabel = extraHint.trim()
+        }
+        val unique = queries.map { it.trim() }.filter { it.length >= 2 }.distinct()
+        if (unique.isEmpty()) {
+            message = "برای جستجو در سایت‌های ایرانی نام کالا مشخص نشد؛ می‌رویم سراغ ثبت با عکس خودت."
+            runLocalPipeline(uri)
+            return
+        }
+        stage = "جستجو در دیجی‌کالا و ترب…"
+        val matches = runCatching {
+            withContext(Dispatchers.IO) { IranianCatalogClient().search(unique) }
+        }.getOrDefault(emptyList())
+        if (matches.isEmpty()) {
+            message = "این کالا در سایت‌های ایرانی پیدا نشد؛ می‌رویم سراغ ثبت با عکس خودت."
+            runLocalPipeline(uri)
+            return
+        }
+        catalogMatches = matches
+        catalogAwaiting = true
+        message = "${matches.size} کالا در سایت‌های ایرانی پیدا شد. اگر مال توست انتخاب کن؛ اگر نیست با عکس خودت ادامه بده."
     }
 
     fun processImage(uri: Uri) {
         sourceUri = uri
         publishResults = emptyList(); localSaved = false; backgroundRemoved = false
+        processedFile = null
+        catalogMatches = emptyList(); catalogDetail = null; catalogImageUrl = null
+        catalogAwaiting = false; searchLabel = ""
         scope.launch {
-            busy = true; error = null; message = null; stage = "آماده‌سازی عکس و ساخت WebP…"
+            busy = true; error = null; message = null
+            runCatching { lookupCatalogThenMaybeLocal(uri) }.onFailure { error = it.message }
+            busy = false; stage = ""
+        }
+    }
+
+    fun skipCatalog() {
+        val uri = sourceUri ?: return
+        scope.launch {
+            busy = true; error = null
+            message = "با عکس خودت ادامه می‌دهیم."
+            runCatching { runLocalPipeline(uri) }.onFailure { error = it.message }
+            busy = false; stage = ""
+        }
+    }
+
+    fun openCatalog(match: CatalogMatch) {
+        scope.launch {
+            busy = true; error = null; stage = "گرفتن توضیحات و عکس از ${match.source}…"
             runCatching {
-                val processed = ProductImageProcessor.prepareProductImage(ctx, uri, threshold.toInt())
+                val detail = withContext(Dispatchers.IO) { IranianCatalogClient().details(match) }
+                catalogDetail = detail
+                catalogImageUrl = detail.imageUrls.firstOrNull() ?: detail.match.imageUrl
+            }.onFailure { error = it.message }
+            busy = false; stage = ""
+        }
+    }
+
+    fun confirmCatalog() {
+        val detail = catalogDetail ?: return
+        val uri = sourceUri
+        val imageUrl = catalogImageUrl
+        scope.launch {
+            busy = true; error = null; stage = "آماده‌سازی متن و عکس انتخاب‌شده…"
+            runCatching {
+                val downloaded = if (!imageUrl.isNullOrBlank()) {
+                    withContext(Dispatchers.IO) { IranianCatalogClient().downloadImage(ctx, imageUrl) }
+                } else null
+                val processed = when {
+                    downloaded != null -> ProductImageProcessor.prepareProductImage(ctx, downloaded, threshold.toInt())
+                    uri != null -> ProductImageProcessor.prepareProductImage(ctx, uri, threshold.toInt())
+                    else -> error("عکسی برای ثبت نیست.")
+                }
                 processedFile = processed.file
                 aiJpegFile = processed.aiJpeg
                 backgroundRemoved = processed.backgroundRemoved
-                runAi(processed.aiJpeg)
-                processed.warning?.let { warning ->
-                    message = listOfNotNull(message, warning).joinToString("\n")
+                name = detail.match.title
+                shortDescription = detail.shortDescription
+                description = detail.description
+                seoTitle = detail.seoTitle
+                seoDescription = detail.seoDescription
+                category = detail.category
+                tags = (listOfNotNull(detail.brand.takeIf { it.isNotBlank() }) + detail.tags).distinct().joinToString("، ")
+                if (globalRegular.isBlank()) {
+                    detail.priceToman?.takeIf { it > 0 }?.let { globalRegular = it.toString() }
                 }
+                catalogAwaiting = false
+                message = "متن و عکس از ${detail.match.source} پر شد. قبل از انتشار همه را چک کن."
             }.onFailure { error = it.message }
             busy = false; stage = ""
         }
@@ -311,12 +433,12 @@ fun SmartProductScreen(nav: NavHostController) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                DinalHero("از عکس تا ۳ فروشگاه", "نسخه ۱۶.۲.۲ — حذف پس‌زمینه روشن و سایه خاکستری روی گوشی") {
+                DinalHero("از عکس تا ۳ فروشگاه", "نسخه ۱۶.۳.۰ — اول جستجو در سایت‌های ایرانی، اگر تأیید نکردی با عکس خودت ادامه می‌دهیم") {
                     Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(42.dp))
                 }
             }
             item {
-                SectionCard("۱) عکس محصول", subtitle = "پس‌زمینه روشن و سایه خاکستری از لبه‌ها حذف می‌شود؛ رنگ داخل خود کالا می‌ماند") {
+                SectionCard("۱) عکس محصول", subtitle = "اول در دیجی‌کالا و ترب می‌گردیم؛ اگر پیدا نشد یا تأیید نکردی، پس‌زمینه عکس خودت حذف می‌شود") {
                     processedFile?.let { file ->
                         TransparentImagePreview(file, Modifier.fillMaxWidth().height(280.dp))
                         AssistChip(
@@ -340,7 +462,10 @@ fun SmartProductScreen(nav: NavHostController) {
                         Button(onClick = ::takePhoto, enabled = !busy, modifier = Modifier.weight(1f)) { Icon(Icons.Rounded.PhotoCamera, null); Spacer(Modifier.width(5.dp)); Text("گرفتن عکس") }
                         OutlinedButton(onClick = { gallery.launch("image/*") }, enabled = !busy, modifier = Modifier.weight(1f)) { Icon(Icons.Rounded.PhotoLibrary, null); Spacer(Modifier.width(5.dp)); Text("گالری") }
                     }
-                    OutlinedTextField(extraHint, { extraHint = it }, label = { Text("اطلاعاتی که از عکس معلوم نیست (اختیاری)") }, supportingText = { Text("مثلاً: جنس استیل، سایز ۵۱، برند گتر") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(extraHint, { extraHint = it }, label = { Text("نام مدل یا راهنما (اختیاری)") }, supportingText = { Text("اگر قبل از عکس بنویسی، جستجوی دیجی‌کالا دقیق‌تر می‌شود. مثلاً: لاجیتک G102") }, modifier = Modifier.fillMaxWidth())
+                    if (sourceUri != null) OutlinedButton(onClick = { sourceUri?.let(::processImage) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Rounded.Search, null); Spacer(Modifier.width(6.dp)); Text("جستجو دوباره در سایت‌های ایرانی")
+                    }
                     if (processedFile != null) OutlinedButton(onClick = {
                         val f = aiJpegFile ?: processedFile ?: return@OutlinedButton
                         scope.launch { busy = true; error = null; runCatching { runAi(f) }.onFailure { error = it.message }; busy = false }
@@ -348,10 +473,77 @@ fun SmartProductScreen(nav: NavHostController) {
                 }
             }
 
+            if (catalogAwaiting) item {
+                SectionCard(
+                    "۲) پیدا شده در سایت‌های ایرانی",
+                    subtitle = if (searchLabel.isBlank()) "اگر این کالا مال توست انتخاب کن؛ وگرنه با عکس خودت ادامه بده" else "جستجو: $searchLabel"
+                ) {
+                    catalogDetail?.let { detail ->
+                        Text(detail.match.title, fontWeight = FontWeight.Bold)
+                        Text("${detail.match.source}${if (detail.brand.isNotBlank()) " • ${detail.brand}" else ""}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (detail.imageUrls.isNotEmpty()) {
+                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                detail.imageUrls.forEach { url ->
+                                    val selected = url == catalogImageUrl
+                                    AsyncImage(
+                                        model = url,
+                                        contentDescription = "عکس کاتالوگ",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(92.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .then(
+                                                if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
+                                                else Modifier
+                                            )
+                                            .clickable { catalogImageUrl = url }
+                                    )
+                                }
+                            }
+                            Text("روی عکس بزن تا همان برای فروشگاه استفاده شود.", style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (detail.priceToman != null && detail.priceToman > 0) {
+                            Text("قیمت تقریبی بازار: ${toman(detail.priceToman.toDouble())}", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(detail.description, style = MaterialTheme.typography.bodySmall, maxLines = 12, overflow = TextOverflow.Ellipsis)
+                        Button(onClick = ::confirmCatalog, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Rounded.CheckCircle, null); Spacer(Modifier.width(6.dp)); Text("همین کالاست؛ متن و عکس را بردار")
+                        }
+                        OutlinedButton(onClick = { catalogDetail = null; catalogImageUrl = null }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                            Text("این نیست، برگرد به لیست")
+                        }
+                    } ?: catalogMatches.forEach { match ->
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .45f),
+                            modifier = Modifier.fillMaxWidth().clickable(enabled = !busy) { openCatalog(match) }
+                        ) {
+                            Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                AsyncImage(
+                                    model = match.imageUrl,
+                                    contentDescription = match.title,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.size(72.dp).clip(RoundedCornerShape(12.dp))
+                                )
+                                Column(Modifier.weight(1f)) {
+                                    Text(match.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text(match.source, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                                    match.priceToman?.takeIf { it > 0 }?.let {
+                                        Text(toman(it.toDouble()), style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    OutlinedButton(onClick = ::skipCatalog, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Rounded.PhotoCamera, null); Spacer(Modifier.width(6.dp)); Text("هیچ‌کدام نیست؛ ادامه با عکس خودم")
+                    }
+                }
+            }
             if (busy) item { SectionCard("در حال پردازش") { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(stage) } }
             item { ErrorText(error); message?.let { SuccessText(it) } }
 
-            item {
+            if (!catalogAwaiting) item {
                 SectionCard("۲) پیش‌نویس محصول", subtitle = "قبل از انتشار هر بخش را بخواهی اصلاح کن") {
                     OutlinedTextField(name, { name = it }, label = { Text("نام محصول") }, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(sku, { sku = it }, label = { Text("SKU (اختیاری)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
@@ -365,7 +557,7 @@ fun SmartProductScreen(nav: NavHostController) {
                 }
             }
 
-            item {
+            if (!catalogAwaiting) item {
                 SectionCard("۳) قیمت و مقصد انتشار", subtitle = "قیمت‌ها در کل StoreHub بر مبنای تومان هستند") {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Switch(samePrice, { samePrice = it })
@@ -399,7 +591,7 @@ fun SmartProductScreen(nav: NavHostController) {
                 }
             }
 
-            item {
+            if (!catalogAwaiting) item {
                 SectionCard("۴) تأیید نهایی") {
                     Text("وضعیت ثبت در سایت", fontWeight = FontWeight.Bold)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

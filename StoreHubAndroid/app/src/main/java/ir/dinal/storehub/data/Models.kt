@@ -57,6 +57,37 @@ data class ProductAiDraft(
     val tags:List<String> = emptyList()
 )
 
+data class ProductSearchHint(
+    val queries: List<String> = emptyList(),
+    val brand: String = "",
+    val model: String = "",
+    val persianName: String = "",
+    val confidence: String = "low"
+)
+
+data class CatalogMatch(
+    val source: String,
+    val sourceId: String,
+    val title: String,
+    val titleEn: String = "",
+    val imageUrl: String? = null,
+    val priceToman: Long? = null,
+    val webUrl: String? = null
+)
+
+data class CatalogProductDetail(
+    val match: CatalogMatch,
+    val description: String,
+    val shortDescription: String,
+    val category: String,
+    val brand: String,
+    val tags: List<String>,
+    val imageUrls: List<String>,
+    val seoTitle: String,
+    val seoDescription: String,
+    val priceToman: Long? = null
+)
+
 data class PublishProductDraft(
     val name:String,
     val sku:String?,

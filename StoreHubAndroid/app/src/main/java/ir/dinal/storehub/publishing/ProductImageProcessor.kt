@@ -43,6 +43,20 @@ object ProductImageProcessor {
     suspend fun retryBackgroundRemoval(context: Context, inputUri: Uri, threshold: Int = 48): Result =
         prepareProductImage(context, inputUri, threshold)
 
+    suspend fun jpegForVision(context: Context, inputUri: Uri): File = withContext(Dispatchers.IO) {
+        val original = decodeBitmap(context, inputUri)
+        val working = resizeIfNeeded(original, 1600)
+        try {
+            saveJpeg(context, working)
+        } finally {
+            if (working !== original && !working.isRecycled) working.recycle()
+            if (!original.isRecycled) original.recycle()
+        }
+    }
+
+    suspend fun prepareProductImage(context: Context, inputFile: File, threshold: Int = 48): Result =
+        prepareProductImage(context, Uri.fromFile(inputFile), threshold)
+
     suspend fun prepareProductImage(context: Context, inputUri: Uri, threshold: Int = 48): Result = withContext(Dispatchers.IO) {
         val original = decodeBitmap(context, inputUri)
         try {
@@ -68,9 +82,17 @@ object ProductImageProcessor {
         }
     }
 
+    private fun openImageStream(context: Context, uri: Uri): java.io.InputStream {
+        if (uri.scheme == "file") {
+            val path = uri.path ?: error("فایل تصویر باز نشد.")
+            return java.io.FileInputStream(File(path))
+        }
+        return context.contentResolver.openInputStream(uri) ?: error("فایل تصویر باز نشد.")
+    }
+
     private fun decodeBitmap(context: Context, uri: Uri): Bitmap {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        openImageStream(context, uri).use { BitmapFactory.decodeStream(it, null, bounds) }
         val side = max(bounds.outWidth, bounds.outHeight).coerceAtLeast(1)
         var sample = 1
         while (side / sample > 3200) sample *= 2
@@ -78,14 +100,14 @@ object ProductImageProcessor {
             inSampleSize = sample
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        val decoded = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+        val decoded = openImageStream(context, uri).use { BitmapFactory.decodeStream(it, null, opts) }
             ?: error("فایل تصویر باز نشد.")
         return rotateFromExif(context, uri, decoded)
     }
 
     private fun rotateFromExif(context: Context, uri: Uri, bmp: Bitmap): Bitmap {
         val orientation = runCatching {
-            context.contentResolver.openInputStream(uri)?.use {
+            openImageStream(context, uri).use {
                 ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
             }
         }.getOrNull() ?: return bmp

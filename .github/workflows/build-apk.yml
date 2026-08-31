@@ -1,4 +1,4 @@
-name: Build DINAL StoreHub V16.2.2 APK
+name: Build DINAL StoreHub V16.3.0 APK
 
 on:
   workflow_dispatch:
@@ -19,12 +19,13 @@ jobs:
       - name: Verify V16.2 source
         run: |
           test -f StoreHubAndroid/app/build.gradle.kts
-          grep -q 'versionName = "16.2.2"' StoreHubAndroid/app/build.gradle.kts
-          grep -q 'versionCode = 20' StoreHubAndroid/app/build.gradle.kts
+          grep -q 'versionName = "16.3.0"' StoreHubAndroid/app/build.gradle.kts
+          grep -q 'versionCode = 21' StoreHubAndroid/app/build.gradle.kts
           grep -q 'DinalAssistantScreen' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/ui/DinalAssistant.kt
           grep -q 'tokens.count' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/data/LocalStore.kt
           grep -q 'removeWhiteBackground' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/publishing/ProductImageProcessor.kt
           grep -q 'gpt-4o-mini' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/publishing/OpenAiProductClient.kt
+          grep -q 'IranianCatalogClient' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/publishing/IranianCatalogClient.kt
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -83,11 +84,11 @@ jobs:
           "$APKSIGNER" verify --verbose StoreHubAndroid/app/build/outputs/apk/release/app-release.apk
 
       - name: Prepare APK
-        run: cp StoreHubAndroid/app/build/outputs/apk/release/app-release.apk DINAL-StoreHub-V16.2.2.apk
+        run: cp StoreHubAndroid/app/build/outputs/apk/release/app-release.apk DINAL-StoreHub-V16.3.0.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: DINAL-StoreHub-V16.2.2-APK
-          path: DINAL-StoreHub-V16.2.2.apk
+          name: DINAL-StoreHub-V16.3.0-APK
+          path: DINAL-StoreHub-V16.3.0.apk
           if-no-files-found: error
