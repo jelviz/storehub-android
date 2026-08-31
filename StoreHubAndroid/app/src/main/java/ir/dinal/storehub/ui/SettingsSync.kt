@@ -210,7 +210,7 @@ fun SettingsScreen(activity: Activity, nav: NavHostController) {
                 Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f))) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("DINAL StoreHub", fontWeight = FontWeight.Bold)
-                        Text("نسخه 16.3.1 • Android Only", style = MaterialTheme.typography.bodySmall)
+                        Text("نسخه 16.3.2 • Android Only", style = MaterialTheme.typography.bodySmall)
                         Text("نویسنده: Mohammad Jelviz", style = MaterialTheme.typography.bodySmall)
                         Text("بدون بک‌اند، بدون VPS؛ اطلاعات اصلی روی همین گوشی ذخیره می‌شود.", style = MaterialTheme.typography.bodySmall)
                     }

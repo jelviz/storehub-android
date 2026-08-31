@@ -31,6 +31,27 @@ class OpenAiProductClient(
         return parseSearchHint(visionText(imageFile, buildIdentifyPrompt(extraHint)))
     }
 
+    fun rankListings(imageFile: File, titles: List<String>): List<Int> {
+        if (titles.isEmpty()) return emptyList()
+        val numbered = titles.mapIndexed { i, t -> "$i) $t" }.joinToString("\n")
+        val prompt = """
+            تو گوگل لنز هستی. عکس یک کالاست. این فهرست نتایج فروشگاه ایرانی است:
+            $numbered
+            کدام ایندکس‌ها همان مدل داخل عکس هستند؟ بی‌ربط‌ها را نیاور.
+            فقط JSON: {"keep":[0,2]}
+        """.trimIndent()
+        val raw = visionText(imageFile, prompt)
+        val json = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        val start = json.indexOf('{')
+        val end = json.lastIndexOf('}')
+        if (start < 0 || end <= start) return emptyList()
+        val keep = JsonParser.parseString(json.substring(start, end + 1)).asJsonObject.getAsJsonArray("keep") ?: return emptyList()
+        return keep.mapNotNull {
+            runCatching { it.asInt }.getOrNull()
+                ?: runCatching { it.asString.toInt() }.getOrNull()
+        }.filter { it in titles.indices }.distinct()
+    }
+
     private fun visionText(imageFile: File, prompt: String): String {
         val image64 = Base64.encodeToString(imageFile.readBytes(), Base64.NO_WRAP)
         return when (provider.lowercase()) {
@@ -59,16 +80,19 @@ class OpenAiProductClient(
     """.trimIndent()
 
     private fun buildIdentifyPrompt(extraHint: String) = """
-        از روی تصویر، کالا را برای جستجو در فروشگاه‌های ایرانی (دیجی‌کالا و ترب) تشخیص بده.
-        اگر برند یا مدل روی کالا خوانا است همان را بنویس. حدس بی‌اساس نزن.
-        ${if (extraHint.isBlank()) "" else "راهنمای فروشنده: $extraHint"}
+        تو گوگل لنز هستی برای فروشگاه ایرانی. کالا را فقط از روی همین عکس تشخیص بده.
+        لوگو، نوشته روی کالا، شکل، رنگ، پورت، دکمه‌ها و بسته‌بندی را بخوان.
+        حدس معقول از روی ظاهر بزن تا بتوان در دیجی‌کالا همان مدل را پیدا کرد.
+        عبارت جستجو باید مشخص باشد (برند + مدل)، نه فقط «ماوس» یا «کالا».
+        ${if (extraHint.isBlank()) "" else "راهنمای اختیاری فروشنده: $extraHint"}
 
         فقط یک JSON معتبر بدون markdown:
         {
-          "queries": ["عبارت فارسی جستجو", "English brand model"],
-          "brand": "برند اگر مشخص است",
-          "model": "مدل اگر مشخص است",
+          "queries": ["عبارت فارسی دقیق", "English brand model"],
+          "brand": "برند",
+          "model": "مدل",
           "persian_name": "نام کوتاه فارسی",
+          "visual_query": "توصیف کوتاه ظاهری برای جستجوی تصویری مثل ماوس مشکی سیمی لاجیتک",
           "confidence": "high یا medium یا low"
         }
     """.trimIndent()
@@ -194,6 +218,7 @@ class OpenAiProductClient(
             brand = o.s("brand"),
             model = o.s("model"),
             persianName = o.s("persian_name"),
+            visualQuery = o.s("visual_query"),
             confidence = o.s("confidence").ifBlank { "low" }
         )
     }

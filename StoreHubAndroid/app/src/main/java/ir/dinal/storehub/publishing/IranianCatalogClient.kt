@@ -22,22 +22,25 @@ class IranianCatalogClient {
         .followRedirects(true)
         .build()
 
-    fun search(queries: List<String>): List<CatalogMatch> {
-        val q = queries.map { it.trim() }.filter { it.length >= 2 }.distinct().take(3)
-        if (q.isEmpty()) return emptyList()
+    fun search(queries: List<String>, visualQuery: String? = null): List<CatalogMatch> {
+        val q = queries.map { it.trim() }.filter { it.length >= 2 }.distinct().take(4)
         val found = LinkedHashMap<String, CatalogMatch>()
+        fun addAll(items: List<CatalogMatch>) {
+            items.forEach { found.putIfAbsent(it.source + it.sourceId, it) }
+        }
+        visualQuery?.trim()?.takeIf { it.length >= 3 }?.let { addAll(runCatching { searchDigikalaLenz(it) }.getOrDefault(emptyList())) }
         for (query in q) {
-            runCatching { searchDigikala(query) }.getOrDefault(emptyList()).forEach { found.putIfAbsent(it.source + it.sourceId, it) }
-            if (found.size >= 8) break
+            addAll(runCatching { searchDigikala(query) }.getOrDefault(emptyList()))
+            if (found.size >= 10) break
         }
-        if (found.size < 4) {
-            runCatching { searchTorob(q.first()) }.getOrDefault(emptyList()).forEach { match ->
-                if (isRelevant(match.title + " " + match.titleEn, q)) {
-                    found.putIfAbsent(match.source + match.sourceId, match)
+        if (found.size < 4 && q.isNotEmpty()) {
+            addAll(
+                runCatching { searchTorob(q.first()) }.getOrDefault(emptyList()).filter { match ->
+                    isRelevant(match.title + " " + match.titleEn, q)
                 }
-            }
+            )
         }
-        return found.values.take(8)
+        return found.values.take(10)
     }
 
     fun details(match: CatalogMatch): CatalogProductDetail = when (match.source) {
@@ -62,9 +65,13 @@ class IranianCatalogClient {
         }
     }
 
-    private fun searchDigikala(query: String): List<CatalogMatch> {
-        val url = "https://api.digikala.com/v1/search/?q=${enc(query)}&page=1"
-        val root = getJson(url)
+    private fun searchDigikala(query: String): List<CatalogMatch> =
+        parseDigikalaProducts(getJson("https://api.digikala.com/v1/search/?q=${enc(query)}&page=1"))
+
+    private fun searchDigikalaLenz(query: String): List<CatalogMatch> =
+        parseDigikalaProducts(getJson("https://api.digikala.com/v1/search/text-lenz/?q=${enc(query)}&page=1"))
+
+    private fun parseDigikalaProducts(root: JsonObject): List<CatalogMatch> {
         val products = root.obj("data")?.arr("products") ?: return emptyList()
         return products.take(8).mapNotNull { el ->
             if (!el.isJsonObject) return@mapNotNull null

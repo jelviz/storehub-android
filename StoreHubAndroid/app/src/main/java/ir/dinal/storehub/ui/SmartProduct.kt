@@ -41,6 +41,7 @@ import coil.compose.AsyncImage
 import ir.dinal.storehub.data.*
 import ir.dinal.storehub.publishing.IranianCatalogClient
 import ir.dinal.storehub.publishing.OpenAiProductClient
+import ir.dinal.storehub.publishing.PhotoBarcode
 import ir.dinal.storehub.publishing.ProductImageProcessor
 import ir.dinal.storehub.publishing.WooPublisher
 import kotlinx.coroutines.Dispatchers
@@ -170,7 +171,7 @@ fun SmartProductScreen(nav: NavHostController) {
     var processedFile by remember { mutableStateOf<File?>(null) }
     var aiJpegFile by remember { mutableStateOf<File?>(null) }
     var backgroundRemoved by rememberSaveable { mutableStateOf(false) }
-    var threshold by remember { mutableFloatStateOf(64f) }
+    var threshold by remember { mutableFloatStateOf(32f) }
     var cameraUri by remember { mutableStateOf<Uri?>(null) }
     var name by rememberSaveable { mutableStateOf("") }
     var sku by rememberSaveable { mutableStateOf("") }
@@ -252,11 +253,25 @@ fun SmartProductScreen(nav: NavHostController) {
     }
 
     suspend fun lookupCatalogThenMaybeLocal(uri: Uri) {
-        stage = "تشخیص کالا از روی عکس…"
+        stage = "جستجو با عکس، مثل گوگل لنز…"
         val jpeg = ProductImageProcessor.jpegForVision(ctx, uri)
         aiJpegFile = jpeg
         val queries = ArrayList<String>()
+        var visualQuery: String? = null
         extraHint.trim().takeIf { it.isNotBlank() }?.let { queries += it }
+
+        val barcode = withContext(Dispatchers.IO) { PhotoBarcode.read(ctx, uri) }
+        if (!barcode.isNullOrBlank()) {
+            queries += barcode
+            searchLabel = "بارکد $barcode"
+        }
+
+        if (!prefs.hasOpenAiKey() && queries.isEmpty()) {
+            message = "برای جستجوی شبیه گوگل لنز باید کلید AI را در تنظیمات بگذاری. عکس را می‌گیریم و با روش خودت ادامه می‌دهیم."
+            runLocalPipeline(uri)
+            return
+        }
+
         if (prefs.hasOpenAiKey()) {
             val hint = runCatching {
                 withContext(Dispatchers.IO) {
@@ -269,23 +284,35 @@ fun SmartProductScreen(nav: NavHostController) {
                 hint.persianName.takeIf { it.isNotBlank() }?.let { queries += it }
                 val brandModel = listOf(hint.brand, hint.model).filter { it.isNotBlank() }.joinToString(" ")
                 if (brandModel.isNotBlank()) queries += brandModel
-                searchLabel = hint.persianName.ifBlank { hint.queries.firstOrNull().orEmpty() }
-            } else {
-                searchLabel = extraHint.trim()
+                visualQuery = hint.visualQuery.takeIf { it.isNotBlank() }
+                searchLabel = hint.persianName.ifBlank { hint.queries.firstOrNull().orEmpty() }.ifBlank { searchLabel }
             }
-        } else {
-            searchLabel = extraHint.trim()
         }
+
         val unique = queries.map { it.trim() }.filter { it.length >= 2 }.distinct()
-        if (unique.isEmpty()) {
-            message = "برای جستجو در سایت‌های ایرانی نام کالا مشخص نشد؛ می‌رویم سراغ ثبت با عکس خودت."
+        if (unique.isEmpty() && visualQuery.isNullOrBlank()) {
+            message = "از روی عکس کالا تشخیص داده نشد؛ می‌رویم سراغ ثبت با عکس خودت."
             runLocalPipeline(uri)
             return
         }
-        stage = "جستجو در دیجی‌کالا و ترب…"
-        val matches = runCatching {
-            withContext(Dispatchers.IO) { IranianCatalogClient().search(unique) }
+        stage = "گشتن در دیجی‌کالا با همان عکس…"
+        var matches = runCatching {
+            withContext(Dispatchers.IO) { IranianCatalogClient().search(unique, visualQuery) }
         }.getOrDefault(emptyList())
+        if (matches.size > 1 && prefs.hasOpenAiKey()) {
+            stage = "تطبیق عکس با نتایج…"
+            val keep = runCatching {
+                withContext(Dispatchers.IO) {
+                    OpenAiProductClient(prefs.openAiKey(), prefs.openAiModel, prefs.aiProvider, prefs.openAiBaseUrl)
+                        .rankListings(jpeg, matches.map { it.title })
+                }
+            }.getOrDefault(emptyList())
+            if (keep.isNotEmpty()) {
+                val picked = keep.map { matches[it] }
+                val rest = matches.filterIndexed { i, _ -> i !in keep }
+                matches = picked + rest
+            }
+        }
         if (matches.isEmpty()) {
             message = "این کالا در سایت‌های ایرانی پیدا نشد؛ می‌رویم سراغ ثبت با عکس خودت."
             runLocalPipeline(uri)
@@ -293,7 +320,7 @@ fun SmartProductScreen(nav: NavHostController) {
         }
         catalogMatches = matches
         catalogAwaiting = true
-        message = "${matches.size} کالا در سایت‌های ایرانی پیدا شد. اگر مال توست انتخاب کن؛ اگر نیست با عکس خودت ادامه بده."
+        message = "از روی عکس ${matches.size} کالا پیدا شد. اگر مال توست انتخاب کن؛ اسم لازم نیست بنویسی."
     }
 
     fun processImage(uri: Uri) {
@@ -433,12 +460,12 @@ fun SmartProductScreen(nav: NavHostController) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                DinalHero("از عکس تا ۳ فروشگاه", "نسخه ۱۶.۳.۱ — اول جستجو در سایت‌های ایرانی، اگر تأیید نکردی با عکس خودت ادامه می‌دهیم") {
+                DinalHero("از عکس تا ۳ فروشگاه", "نسخه ۱۶.۳.۲ — جستجو با خودِ عکس مثل گوگل لنز؛ اسم لازم نیست") {
                     Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(42.dp))
                 }
             }
             item {
-                SectionCard("۱) عکس محصول", subtitle = "اول در دیجی‌کالا و ترب می‌گردیم؛ اگر پیدا نشد یا تأیید نکردی، پس‌زمینه عکس خودت حذف می‌شود") {
+                SectionCard("۱) عکس محصول", subtitle = "عکس را می‌گیرد و مثل لنز در دیجی‌کالا می‌گردد. اسم لازم نیست.") {
                     processedFile?.let { file ->
                         TransparentImagePreview(file, Modifier.fillMaxWidth().height(280.dp))
                         AssistChip(
@@ -447,9 +474,9 @@ fun SmartProductScreen(nav: NavHostController) {
                             leadingIcon = { Icon(if (backgroundRemoved) Icons.Rounded.CheckCircle else Icons.Rounded.Info, null, Modifier.size(16.dp)) }
                         )
                         Text("خانه‌های شطرنجی یعنی آن قسمت شفاف شده. لکه خاکستری یعنی هنوز مانده.")
-                        Text("حساسیت حذف پس‌زمینه: ${threshold.toInt()}")
+                        Text("اگر لبه کالا خورده شد عدد را کم کن. انعکاس روی خودِ کالا پس‌زمینه نیست.")
                         Slider(value = threshold, onValueChange = { threshold = it }, valueRange = 20f..100f, enabled = !busy)
-                        Text("اگر سایه ماند، عدد را بالا ببر و «دوباره حذف پس‌زمینه» بزن. اگر لبه کالا خورده شد، عدد را کم کن.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("حساسیت حذف پس‌زمینه: ${threshold.toInt()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (sourceUri != null) {
                             OutlinedButton(onClick = ::retryBackgroundRemoval, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                                 Icon(Icons.Rounded.AutoFixHigh, null); Spacer(Modifier.width(6.dp)); Text("دوباره حذف پس‌زمینه")
@@ -462,9 +489,9 @@ fun SmartProductScreen(nav: NavHostController) {
                         Button(onClick = ::takePhoto, enabled = !busy, modifier = Modifier.weight(1f)) { Icon(Icons.Rounded.PhotoCamera, null); Spacer(Modifier.width(5.dp)); Text("گرفتن عکس") }
                         OutlinedButton(onClick = { gallery.launch("image/*") }, enabled = !busy, modifier = Modifier.weight(1f)) { Icon(Icons.Rounded.PhotoLibrary, null); Spacer(Modifier.width(5.dp)); Text("گالری") }
                     }
-                    OutlinedTextField(extraHint, { extraHint = it }, label = { Text("نام مدل یا راهنما (اختیاری)") }, supportingText = { Text("اگر قبل از عکس بنویسی، جستجوی دیجی‌کالا دقیق‌تر می‌شود. مثلاً: لاجیتک G102") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(extraHint, { extraHint = it }, label = { Text("اصلاح دستی (لازم نیست)") }, supportingText = { Text("جستجو از روی خود عکس است. فقط اگر لنز اشتباه رفت اینجا بنویس.") }, modifier = Modifier.fillMaxWidth())
                     if (sourceUri != null) OutlinedButton(onClick = { sourceUri?.let(::processImage) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Rounded.Search, null); Spacer(Modifier.width(6.dp)); Text("جستجو دوباره در سایت‌های ایرانی")
+                        Icon(Icons.Rounded.Search, null); Spacer(Modifier.width(6.dp)); Text("جستجو دوباره با همین عکس")
                     }
                     if (processedFile != null) OutlinedButton(onClick = {
                         val f = aiJpegFile ?: processedFile ?: return@OutlinedButton
@@ -476,7 +503,7 @@ fun SmartProductScreen(nav: NavHostController) {
             if (catalogAwaiting) item {
                 SectionCard(
                     "۲) پیدا شده در سایت‌های ایرانی",
-                    subtitle = if (searchLabel.isBlank()) "اگر این کالا مال توست انتخاب کن؛ وگرنه با عکس خودت ادامه بده" else "جستجو: $searchLabel"
+                    subtitle = if (searchLabel.isBlank()) "از روی عکس پیدا شد؛ اگر مال توست انتخاب کن" else "از روی عکس: $searchLabel"
                 ) {
                     catalogDetail?.let { detail ->
                         Text(detail.match.title, fontWeight = FontWeight.Bold)

@@ -62,6 +62,7 @@ data class ProductSearchHint(
     val brand: String = "",
     val model: String = "",
     val persianName: String = "",
+    val visualQuery: String = "",
     val confidence: String = "low"
 )
 

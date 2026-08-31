@@ -124,8 +124,8 @@ object ProductImageProcessor {
     }
 
     /**
-     * Flood-fill from the photo border: paper, off-white, and connected gray shadows
-     * become transparent. Interior whites (logo print) stay. Dark / colorful product pixels stay.
+     * Remove only paper/studio background connected to the photo border.
+     * Stops at dark product edges and does not eat glossy highlights on the item.
      */
     internal fun removeWhiteBackground(src: Bitmap, threshold: Int): Bitmap {
         val w = src.width
@@ -139,168 +139,119 @@ object ProductImageProcessor {
         val bgG = Color.green(bg)
         val bgB = Color.blue(bg)
         val bgL = luma(bgR, bgG, bgB)
-        val bgC = chroma(bgR, bgG, bgB)
 
         val t01 = ((threshold.coerceIn(20, 100) - 20) / 80.0)
-        val minLuma = (bgL - (72.0 + t01 * 115.0)).coerceAtLeast(82.0)
-        val maxChroma = (16.0 + bgC + t01 * 30.0).coerceAtMost(58.0)
-        val colorTol = 36.0 + t01 * 90.0
+        val maxLumaDrop = 26.0 + t01 * 50.0
+        val colorTol = 20.0 + t01 * 38.0
+        val edgeStop = 16.0 + (1.0 - t01) * 16.0
+        val productFloor = 120.0 - t01 * 18.0
 
-        fun isBackground(color: Int, loose: Boolean): Boolean {
+        fun paperLike(color: Int): Boolean {
             val r = Color.red(color)
             val g = Color.green(color)
             val b = Color.blue(color)
             val L = luma(r, g, b)
-            val C = chroma(r, g, b)
-            val floor = if (loose) (minLuma - 14.0).coerceAtLeast(70.0) else minLuma
-            if (L < floor) return false
-            val dist = colorDist(r, g, b, bgR, bgG, bgB)
-            if (dist <= if (loose) colorTol + 18.0 else colorTol) return true
-            val chromaLimit = if (loose) maxChroma + 12.0 else maxChroma
-            if (C <= chromaLimit) return true
-            val paperLike =
-                abs((r - g) - (bgR - bgG)) < 22 &&
-                    abs((g - b) - (bgG - bgB)) < 22 &&
-                    C <= chromaLimit + 10.0
-            return paperLike
+            if (L < productFloor) return false
+            if (L < bgL - maxLumaDrop) return false
+            return colorDist(r, g, b, bgR, bgG, bgB) <= colorTol
+        }
+
+        fun highlightOnProduct(i: Int): Boolean {
+            val x = i % w
+            val y = i / w
+            var dark = 0
+            if (x > 0 && luma(px[i - 1]) < 108) dark++
+            if (x < w - 1 && luma(px[i + 1]) < 108) dark++
+            if (y > 0 && luma(px[i - w]) < 108) dark++
+            if (y < h - 1 && luma(px[i + w]) < 108) dark++
+            return dark >= 2
+        }
+
+        fun canEnter(from: Int, to: Int): Boolean {
+            if (!paperLike(px[to])) return false
+            if (highlightOnProduct(to)) return false
+            if (from != to && luma(px[from]) - luma(px[to]) > edgeStop) return false
+            return true
         }
 
         val mask = BooleanArray(w * h)
-        floodFromBorder(px, mask, w, h) { isBackground(it, loose = false) }
-        growFromMask(px, mask, w, h) { isBackground(it, loose = true) }
-        dilateMask(mask, w, h, if (t01 >= 0.45) 2 else 1)
-        dropGrayIslands(px, mask, w, h)
+        floodPaper(px, mask, w, h, ::canEnter)
+        erodeBackground(mask, w, h, 1)
 
         val out = IntArray(w * h)
         for (i in px.indices) {
             out[i] = if (mask[i]) Color.TRANSPARENT else (px[i] or (0xFF shl 24))
         }
-        featherEdge(out, mask, w, h, 2)
+        featherEdge(out, mask, w, h, 1)
         bmp.setPixels(out, 0, w, 0, 0, w, h)
         return bmp
     }
 
-    private fun floodFromBorder(px: IntArray, mask: BooleanArray, w: Int, h: Int, pred: (Int) -> Boolean) {
-        val q = ArrayDeque<Int>()
-        fun tryEnqueue(i: Int) {
-            if (i < 0 || i >= px.size || mask[i]) return
-            if (pred(px[i])) {
-                mask[i] = true
-                q.add(i)
-            }
-        }
-        for (x in 0 until w) {
-            tryEnqueue(x)
-            tryEnqueue((h - 1) * w + x)
-        }
-        for (y in 0 until h) {
-            tryEnqueue(y * w)
-            tryEnqueue(y * w + w - 1)
-        }
-        drainEight(q, mask, w, h, px, pred)
-    }
-
-    private fun growFromMask(px: IntArray, mask: BooleanArray, w: Int, h: Int, pred: (Int) -> Boolean) {
-        val q = ArrayDeque<Int>()
-        for (i in mask.indices) if (mask[i]) q.add(i)
-        drainEight(q, mask, w, h, px, pred)
-    }
-
-    private fun drainEight(
-        q: ArrayDeque<Int>,
+    private fun floodPaper(
+        px: IntArray,
         mask: BooleanArray,
         w: Int,
         h: Int,
-        px: IntArray,
-        pred: (Int) -> Boolean
+        canEnter: (Int, Int) -> Boolean
     ) {
+        val q = ArrayDeque<Int>()
+        fun seed(i: Int) {
+            if (i < 0 || i >= px.size || mask[i]) return
+            if (!canEnter(i, i)) return
+            mask[i] = true
+            q.add(i)
+        }
+        for (x in 0 until w) {
+            seed(x)
+            seed((h - 1) * w + x)
+        }
+        for (y in 0 until h) {
+            seed(y * w)
+            seed(y * w + w - 1)
+        }
         while (q.isNotEmpty()) {
             val i = q.removeFirst()
             val x = i % w
             val y = i / w
-            for (dy in -1..1) {
-                val yy = y + dy
-                if (yy < 0 || yy >= h) continue
-                for (dx in -1..1) {
-                    if (dx == 0 && dy == 0) continue
-                    val xx = x + dx
-                    if (xx < 0 || xx >= w) continue
-                    val n = yy * w + xx
-                    if (mask[n]) continue
-                    if (pred(px[n])) {
-                        mask[n] = true
-                        q.add(n)
-                    }
+            val neighbors = intArrayOf(
+                if (x > 0) i - 1 else -1,
+                if (x < w - 1) i + 1 else -1,
+                if (y > 0) i - w else -1,
+                if (y < h - 1) i + w else -1
+            )
+            for (n in neighbors) {
+                if (n < 0 || mask[n]) continue
+                if (canEnter(i, n)) {
+                    mask[n] = true
+                    q.add(n)
                 }
             }
         }
     }
 
-    private fun dilateMask(mask: BooleanArray, w: Int, h: Int, radius: Int) {
+    /** Pull the cutout back one pixel so glossy product edges are not bitten off. */
+    private fun erodeBackground(mask: BooleanArray, w: Int, h: Int, radius: Int) {
         if (radius <= 0) return
         val src = mask.copyOf()
         for (y in 0 until h) {
             for (x in 0 until w) {
                 val i = y * w + x
-                if (src[i]) continue
-                var hit = false
+                if (!src[i]) continue
+                var nextToProduct = false
                 loop@ for (dy in -radius..radius) {
                     val yy = y + dy
                     if (yy < 0 || yy >= h) continue
                     for (dx in -radius..radius) {
                         val xx = x + dx
                         if (xx < 0 || xx >= w) continue
-                        if (src[yy * w + xx]) {
-                            hit = true
+                        if (!src[yy * w + xx]) {
+                            nextToProduct = true
                             break@loop
                         }
                     }
                 }
-                if (hit) mask[i] = true
+                if (nextToProduct) mask[i] = false
             }
-        }
-    }
-
-    /** Leftover gray JPEG crumbs that are not part of the main product become transparent. */
-    private fun dropGrayIslands(px: IntArray, mask: BooleanArray, w: Int, h: Int) {
-        val n = w * h
-        val seen = BooleanArray(n)
-        data class Blob(val pixels: IntArray, val solid: Int, val meanL: Double)
-        val blobs = ArrayList<Blob>()
-        var largest = 0
-        for (start in 0 until n) {
-            if (mask[start] || seen[start]) continue
-            val pixels = ArrayList<Int>(64)
-            val q = ArrayDeque<Int>()
-            q.add(start)
-            seen[start] = true
-            var solid = 0
-            var lumaSum = 0.0
-            while (q.isNotEmpty()) {
-                val i = q.removeFirst()
-                pixels.add(i)
-                val r = Color.red(px[i])
-                val g = Color.green(px[i])
-                val b = Color.blue(px[i])
-                val L = luma(r, g, b)
-                lumaSum += L
-                if (L < 112.0 || chroma(r, g, b) > 34.0) solid++
-                val x = i % w
-                val y = i / w
-                if (x > 0 && !mask[i - 1] && !seen[i - 1]) { seen[i - 1] = true; q.add(i - 1) }
-                if (x < w - 1 && !mask[i + 1] && !seen[i + 1]) { seen[i + 1] = true; q.add(i + 1) }
-                if (y > 0 && !mask[i - w] && !seen[i - w]) { seen[i - w] = true; q.add(i - w) }
-                if (y < h - 1 && !mask[i + w] && !seen[i + w]) { seen[i + w] = true; q.add(i + w) }
-            }
-            if (pixels.size > largest) largest = pixels.size
-            blobs.add(Blob(pixels.toIntArray(), solid, lumaSum / pixels.size))
-        }
-        val areaLimit = (n * 0.04).toInt().coerceAtLeast(80)
-        for (blob in blobs) {
-            if (blob.pixels.size == largest) continue
-            val junk = blob.pixels.size < areaLimit ||
-                (blob.meanL > 132.0 && blob.solid < blob.pixels.size * 0.12)
-            if (junk) for (i in blob.pixels) mask[i] = true
         }
     }
 
@@ -333,9 +284,9 @@ object ProductImageProcessor {
         }
     }
 
-    private fun luma(r: Int, g: Int, b: Int): Double = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    private fun luma(color: Int): Double = luma(Color.red(color), Color.green(color), Color.blue(color))
 
-    private fun chroma(r: Int, g: Int, b: Int): Int = max(r, max(g, b)) - minOf(r, g, b)
+    private fun luma(r: Int, g: Int, b: Int): Double = 0.2126 * r + 0.7152 * g + 0.0722 * b
 
     private fun colorDist(r: Int, g: Int, b: Int, br: Int, bg: Int, bb: Int): Double {
         val dr = (r - br).toDouble()
