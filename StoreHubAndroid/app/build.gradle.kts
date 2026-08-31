@@ -13,8 +13,8 @@ android {
         applicationId = "ir.dinal.storehub"
         minSdk = 26
         targetSdk = 35
-        versionCode = 19
-        versionName = "16.2.1"
+        versionCode = 20
+        versionName = "16.2.2"
     }
 
     compileOptions {

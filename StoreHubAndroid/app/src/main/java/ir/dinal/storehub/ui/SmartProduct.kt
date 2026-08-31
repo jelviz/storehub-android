@@ -15,6 +15,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -158,7 +164,7 @@ fun SmartProductScreen(nav: NavHostController) {
     var processedFile by remember { mutableStateOf<File?>(null) }
     var aiJpegFile by remember { mutableStateOf<File?>(null) }
     var backgroundRemoved by rememberSaveable { mutableStateOf(false) }
-    var threshold by remember { mutableFloatStateOf(48f) }
+    var threshold by remember { mutableFloatStateOf(64f) }
     var cameraUri by remember { mutableStateOf<Uri?>(null) }
     var name by rememberSaveable { mutableStateOf("") }
     var sku by rememberSaveable { mutableStateOf("") }
@@ -305,21 +311,23 @@ fun SmartProductScreen(nav: NavHostController) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                DinalHero("از عکس تا ۳ فروشگاه", "نسخه ۱۶.۲.۱ — حذف پس‌زمینه سفید روی گوشی، بدون دانلود مدل گوگل") {
+                DinalHero("از عکس تا ۳ فروشگاه", "نسخه ۱۶.۲.۲ — حذف پس‌زمینه روشن و سایه خاکستری روی گوشی") {
                     Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(42.dp))
                 }
             }
             item {
-                SectionCard("۱) عکس محصول", subtitle = "پس‌زمینه روشن از لبه‌های عکس حذف می‌شود؛ سفید داخل خود کالا می‌ماند") {
+                SectionCard("۱) عکس محصول", subtitle = "پس‌زمینه روشن و سایه خاکستری از لبه‌ها حذف می‌شود؛ رنگ داخل خود کالا می‌ماند") {
                     processedFile?.let { file ->
-                        AsyncImage(model = file, contentDescription = "تصویر پردازش‌شده", modifier = Modifier.fillMaxWidth().height(280.dp))
+                        TransparentImagePreview(file, Modifier.fillMaxWidth().height(280.dp))
                         AssistChip(
                             onClick = {},
                             label = { Text(if (backgroundRemoved) "WebP شفاف • پس‌زمینه حذف شد" else "WebP آماده • پس‌زمینه کم حذف شد") },
                             leadingIcon = { Icon(if (backgroundRemoved) Icons.Rounded.CheckCircle else Icons.Rounded.Info, null, Modifier.size(16.dp)) }
                         )
+                        Text("خانه‌های شطرنجی یعنی آن قسمت شفاف شده. لکه خاکستری یعنی هنوز مانده.")
                         Text("حساسیت حذف پس‌زمینه: ${threshold.toInt()}")
-                        Slider(value = threshold, onValueChange = { threshold = it }, valueRange = 24f..80f, enabled = !busy)
+                        Slider(value = threshold, onValueChange = { threshold = it }, valueRange = 20f..100f, enabled = !busy)
+                        Text("اگر سایه ماند، عدد را بالا ببر و «دوباره حذف پس‌زمینه» بزن. اگر لبه کالا خورده شد، عدد را کم کن.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (sourceUri != null) {
                             OutlinedButton(onClick = ::retryBackgroundRemoval, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                                 Icon(Icons.Rounded.AutoFixHigh, null); Spacer(Modifier.width(6.dp)); Text("دوباره حذف پس‌زمینه")
@@ -480,5 +488,42 @@ fun SmartProductScreen(nav: NavHostController) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TransparentImagePreview(file: File, modifier: Modifier) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(16.dp))
+            .drawBehind {
+                val cell = 14.dp.toPx()
+                val light = Color(0xFFE4E8EF)
+                val dark = Color(0xFFB8C0CC)
+                var row = 0
+                var y = 0f
+                while (y < size.height) {
+                    var col = 0
+                    var x = 0f
+                    while (x < size.width) {
+                        drawRect(
+                            color = if ((row + col) % 2 == 0) light else dark,
+                            topLeft = Offset(x, y),
+                            size = Size(cell, cell)
+                        )
+                        x += cell
+                        col++
+                    }
+                    y += cell
+                    row++
+                }
+            }
+    ) {
+        AsyncImage(
+            model = file,
+            contentDescription = "تصویر پردازش‌شده",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Fit
+        )
     }
 }
