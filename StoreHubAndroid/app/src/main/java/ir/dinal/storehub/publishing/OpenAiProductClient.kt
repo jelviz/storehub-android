@@ -120,20 +120,19 @@ class OpenAiProductClient(
                 })
             }
             val req = Request.Builder().url(url).header("Content-Type", "application/json").post(body.toString().toRequestBody(JSON)).build()
-            client.newCall(req).execute().use { r ->
-                val raw = r.body?.string().orEmpty()
-                if (r.isSuccessful) {
-                    val t = JsonParser.parseString(raw).asJsonObject
-                        .getAsJsonArray("candidates")?.get(0)?.asJsonObject
-                        ?.getAsJsonObject("content")?.getAsJsonArray("parts")?.get(0)?.asJsonObject
-                        ?.get("text")?.asString
-                    if (!t.isNullOrBlank()) return t
-                    last = "پاسخ Gemini خالی بود."
-                } else {
-                    last = "Gemini HTTP ${r.code}: ${raw.take(280)}"
-                    if (r.code in setOf(400, 404)) continue
-                    error(last)
-                }
+            val (ok, code, raw) = client.newCall(req).execute().use { r ->
+                Triple(r.isSuccessful, r.code, r.body?.string().orEmpty())
+            }
+            if (ok) {
+                val t = JsonParser.parseString(raw).asJsonObject
+                    .getAsJsonArray("candidates")?.get(0)?.asJsonObject
+                    ?.getAsJsonObject("content")?.getAsJsonArray("parts")?.get(0)?.asJsonObject
+                    ?.get("text")?.asString
+                if (!t.isNullOrBlank()) return t
+                last = "پاسخ Gemini خالی بود."
+            } else {
+                last = "Gemini HTTP $code: ${raw.take(280)}"
+                if (code !in setOf(400, 404)) error(last)
             }
         }
         error(last)
