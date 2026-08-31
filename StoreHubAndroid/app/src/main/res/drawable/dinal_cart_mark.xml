@@ -1,0 +1,39 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Same DINAL cart mark is used by both launcher icon and animated splash. -->
+    <path
+        android:fillColor="#FFF4F5"
+        android:pathData="M54,7 A47,47 0,1 1 53.99,7 Z" />
+    <path
+        android:fillColor="#FDE3E6"
+        android:pathData="M54,15 A39,39 0,1 1 53.99,15 Z" />
+
+    <!-- Cart handle and basket -->
+    <path
+        android:fillColor="#E52E3D"
+        android:pathData="M27,31 L34,31 L37.5,39 L82,39 L75,64 L40,64 L32,39 L27,39 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M41,45 L76,45 L72.5,58 L44.5,58 Z" />
+
+    <!-- Checkout tick -->
+    <path
+        android:fillColor="#E52E3D"
+        android:pathData="M50,49 L56,55 L68,43 L72,47 L56,63 L46,53 Z" />
+
+    <!-- Wheels -->
+    <path
+        android:fillColor="#E52E3D"
+        android:pathData="M44,68 A6,6 0,1 1 43.99,68 Z" />
+    <path
+        android:fillColor="#E52E3D"
+        android:pathData="M70,68 A6,6 0,1 1 69.99,68 Z" />
+
+    <!-- Small D accent -->
+    <path
+        android:fillColor="#E52E3D"
+        android:pathData="M46,82 L46,94 L52,94 C60,94 65,89 65,82 C65,75 60,70 52,70 L46,70 Z M51,75 L52,75 C57,75 60,77.7 60,82 C60,86.3 57,89 52,89 L51,89 Z" />
+</vector>
