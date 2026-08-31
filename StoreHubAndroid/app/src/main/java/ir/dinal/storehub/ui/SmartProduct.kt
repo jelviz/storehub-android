@@ -248,9 +248,9 @@ fun SmartProductScreen(nav: NavHostController) {
                     aiJpegFile = result.aiJpeg
                     backgroundRemoved = result.backgroundRemoved
                     message = if (result.backgroundRemoved) {
-                        "حذف بک‌گراند انجام شد و WebP جدید آماده است."
+                        "حذف پس‌زمینه انجام شد و WebP جدید آماده است."
                     } else {
-                        result.warning ?: "مدل هنوز آماده نیست؛ ثبت محصول همچنان قابل ادامه است."
+                        result.warning ?: "پس‌زمینه سفید کم بود؛ ثبت کالا ادامه دارد. کالا را روی زمینه سفید عکس بگیر."
                     }
                 }
                 .onFailure { error = it.message }
@@ -305,7 +305,7 @@ fun SmartProductScreen(nav: NavHostController) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                DinalHero("از عکس تا ۳ فروشگاه", "حذف پس‌زمینه سفید روی گوشی • پیشنویس AI • تیک سایت‌ها • ثبت ووکامرس") {
+                DinalHero("از عکس تا ۳ فروشگاه", "نسخه ۱۶.۲.۱ — حذف پس‌زمینه سفید روی گوشی، بدون دانلود مدل گوگل") {
                     Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(42.dp))
                 }
             }

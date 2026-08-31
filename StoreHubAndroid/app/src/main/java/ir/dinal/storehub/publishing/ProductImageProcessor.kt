@@ -9,15 +9,9 @@ import android.graphics.Matrix
 import android.net.Uri
 import android.os.Build
 import androidx.exifinterface.media.ExifInterface
-import com.google.android.gms.common.moduleinstall.ModuleInstall
-import com.google.android.gms.tasks.Tasks
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
-import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
 import java.io.File
 import java.io.FileOutputStream
 import java.util.ArrayDeque
-import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.sqrt
@@ -39,21 +33,9 @@ object ProductImageProcessor {
         return File(dir, "capture-${System.currentTimeMillis()}.jpg")
     }
 
-    fun prefetchSubjectSegmentation(context: Context) {
-        val segmenter = SubjectSegmentation.getClient(
-            SubjectSegmenterOptions.Builder().enableForegroundBitmap().build()
-        )
-        runCatching {
-            ModuleInstall.getClient(context.applicationContext)
-                .deferredInstall(segmenter)
-                .addOnCompleteListener { segmenter.close() }
-        }.onFailure { segmenter.close() }
-    }
-
     /**
-     * White studio backgrounds are removed on-device by flood-filling from the edges.
-     * ML Kit is only used as a bonus if that module is already downloaded.
-     * WooCommerce gets a transparent WebP; the AI model gets a JPEG of the original photo.
+     * White / light backgrounds connected to the photo edges are removed on-device.
+     * No Google ML Kit download is required. WooCommerce gets a transparent WebP.
      */
     suspend fun prepareSmartProductWebp(context: Context, inputUri: Uri, threshold: Int = 48): Result =
         prepareProductImage(context, inputUri, threshold)
@@ -66,16 +48,7 @@ object ProductImageProcessor {
         try {
             val working = resizeIfNeeded(original, 1600)
             val aiJpeg = saveJpeg(context, working)
-            val flood = removeWhiteBackground(working, threshold)
-            val cutout = if (hasTransparency(flood)) {
-                flood
-            } else {
-                val mlKit = trySegmentIfReady(context, inputUri)
-                if (mlKit != null) {
-                    if (!flood.isRecycled && flood !== working) flood.recycle()
-                    resizeIfNeeded(mlKit, 1600).also { if (it !== mlKit && !mlKit.isRecycled) mlKit.recycle() }
-                } else flood
-            }
+            val cutout = removeWhiteBackground(working, threshold)
             val webp = saveWebp(context, cutout)
             val removed = hasTransparency(cutout)
             val w = cutout.width
@@ -88,31 +61,10 @@ object ProductImageProcessor {
                 width = w,
                 height = h,
                 backgroundRemoved = removed,
-                warning = if (removed) null else "پس‌زمینه سفید خیلی کم تشخیص داده شد. حساسیت را بالا ببر یا عکس را روی زمینه سفید بگیر."
+                warning = if (removed) null else "پس‌زمینه سفید خیلی کم تشخیص داده شد. کالا را روی زمینه سفید عکس بگیر یا حساسیت را بالا ببر."
             )
         } finally {
             if (!original.isRecycled) original.recycle()
-        }
-    }
-
-    private fun trySegmentIfReady(context: Context, inputUri: Uri): Bitmap? {
-        val options = SubjectSegmenterOptions.Builder().enableForegroundBitmap().build()
-        val segmenter = SubjectSegmentation.getClient(options)
-        try {
-            val moduleClient = ModuleInstall.getClient(context.applicationContext)
-            val available = runCatching {
-                Tasks.await(moduleClient.areModulesAvailable(segmenter), 2, TimeUnit.SECONDS).areModulesAvailable()
-            }.getOrDefault(false)
-            if (!available) {
-                runCatching { moduleClient.deferredInstall(segmenter) }
-                return null
-            }
-            val image = InputImage.fromFilePath(context, inputUri)
-            return runCatching {
-                Tasks.await(segmenter.process(image), 20, TimeUnit.SECONDS).foregroundBitmap
-            }.getOrNull()
-        } finally {
-            segmenter.close()
         }
     }
 

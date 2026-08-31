@@ -13,8 +13,8 @@ android {
         applicationId = "ir.dinal.storehub"
         minSdk = 26
         targetSdk = 35
-        versionCode = 18
-        versionName = "16.2.0"
+        versionCode = 19
+        versionName = "16.2.1"
     }
 
     compileOptions {
@@ -75,7 +75,6 @@ dependencies {
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
     implementation("com.google.android.gms:play-services-base:18.10.1")
-    implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
 
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.print:print:1.0.0")
