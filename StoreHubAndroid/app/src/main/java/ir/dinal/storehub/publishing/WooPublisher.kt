@@ -24,12 +24,18 @@ class WooPublisher {
         .writeTimeout(70, TimeUnit.SECONDS)
         .build()
 
-    fun publish(site: WooPublishSite, draft: PublishProductDraft, imageFile: File): WooPublishResult = runCatching {
+    fun publish(site: WooPublishSite, draft: PublishProductDraft, imageFile: File): WooPublishResult =
+        publish(site, draft, listOf(imageFile))
+
+    fun publish(site: WooPublishSite, draft: PublishProductDraft, imageFiles: List<File>): WooPublishResult = runCatching {
         validate(site, draft)
-        var imageNote = ""
-        val mediaId = runCatching { uploadMedia(site, imageFile, draft.name) }.getOrElse {
-            imageNote = it.message ?: "عکس آپلود نشد."
-            null
+        val files = imageFiles.filter { it.exists() && it.length() > 0L }
+        val mediaIds = ArrayList<Long>()
+        val failNotes = ArrayList<String>()
+        files.forEachIndexed { index, file ->
+            runCatching { uploadMedia(site, file, "${draft.name} ${index + 1}") }
+                .onSuccess { mediaIds += it }
+                .onFailure { failNotes += (it.message ?: "عکس ${index + 1} آپلود نشد") }
         }
         val categoryId = draft.category?.takeIf { it.isNotBlank() }?.let { findOrCreateCategory(site, it) }
         val json = JsonObject().apply {
@@ -42,7 +48,11 @@ class WooPublisher {
             addProperty("short_description", draft.shortDescription)
             addProperty("description", draft.description)
             if (categoryId != null) add("categories", JsonArray().apply { add(JsonObject().apply { addProperty("id", categoryId) }) })
-            if (mediaId != null) add("images", JsonArray().apply { add(JsonObject().apply { addProperty("id", mediaId) }) })
+            if (mediaIds.isNotEmpty()) {
+                add("images", JsonArray().apply {
+                    mediaIds.forEach { id -> add(JsonObject().apply { addProperty("id", id) }) }
+                })
+            }
             add("meta_data", JsonArray().apply {
                 if (draft.seoTitle.isNotBlank()) add(JsonObject().apply { addProperty("key", "_storehub_seo_title"); addProperty("value", draft.seoTitle) })
                 if (draft.seoDescription.isNotBlank()) add(JsonObject().apply { addProperty("key", "_storehub_seo_description"); addProperty("value", draft.seoDescription) })
@@ -70,7 +80,12 @@ class WooPublisher {
         val o = JsonParser.parseString(raw).asJsonObject
         val id = o.get("id")?.asLong
         val link = o.get("permalink")?.asString
-        val extra = if (mediaId == null) " کالا ثبت شد ولی عکس نرفت: $imageNote" else ""
+        val extra = when {
+            files.isEmpty() -> ""
+            mediaIds.isEmpty() -> " کالا ثبت شد ولی عکس‌ها نرفتند: ${failNotes.firstOrNull().orEmpty()}"
+            failNotes.isNotEmpty() -> " ${mediaIds.size} عکس رفت، ${failNotes.size} عکس نرفت."
+            else -> " ${mediaIds.size} عکس هم آپلود شد."
+        }
         WooPublishResult(
             site.index,
             site.name,
@@ -104,7 +119,7 @@ class WooPublisher {
             "webp" -> "image/webp"
             else -> "image/jpeg"
         }
-        val filename = "storehub-${System.currentTimeMillis()}.${image.extension.ifBlank { "webp" }}"
+        val filename = "storehub-${System.nanoTime()}.${image.extension.ifBlank { "jpg" }}"
         val attempts = mutableListOf<Pair<String, String>>()
         val user = site.wpUsername.trim()
         val pass = site.wpAppPassword.replace(" ", "")

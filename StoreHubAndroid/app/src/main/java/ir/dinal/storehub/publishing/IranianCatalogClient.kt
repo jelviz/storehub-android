@@ -59,10 +59,24 @@ class IranianCatalogClient {
                 else -> "jpg"
             }
             val dir = File(context.cacheDir, "catalog").apply { mkdirs() }
-            val out = File(dir, "catalog-${System.currentTimeMillis()}.$ext")
+            val out = File(dir, "catalog-${System.nanoTime()}.$ext")
             out.writeBytes(raw)
             return out
         }
+    }
+
+    fun downloadImages(context: Context, urls: List<String>): List<File> {
+        val seen = LinkedHashSet<String>()
+        val files = ArrayList<File>()
+        for (url in urls) {
+            val clean = url.trim()
+            if (clean.isBlank() || !clean.startsWith("http")) continue
+            val key = clean.substringBefore('?')
+            if (!seen.add(key)) continue
+            runCatching { downloadImage(context, largerImage(clean)) }.onSuccess { files += it }
+        }
+        require(files.isNotEmpty()) { "هیچ عکسی از صفحه کالا دانلود نشد." }
+        return files
     }
 
     private fun searchDigikala(query: String): List<CatalogMatch> =
@@ -130,7 +144,7 @@ class IranianCatalogClient {
             category = category,
             brand = brand,
             tags = tags,
-            imageUrls = images.toList().take(12),
+            imageUrls = images.toList().take(24),
             seoTitle = title.take(70),
             seoDescription = short.take(160),
             priceToman = price
@@ -186,7 +200,7 @@ class IranianCatalogClient {
             category = "",
             brand = "",
             tags = emptyList(),
-            imageUrls = images.filter { it.startsWith("http") }.take(8),
+            imageUrls = images.filter { it.startsWith("http") }.distinct().take(24),
             seoTitle = name.take(70),
             seoDescription = text.take(160),
             priceToman = match.priceToman
@@ -260,7 +274,7 @@ class IranianCatalogClient {
     }
 
     private fun largerImage(url: String): String =
-        url.replace(Regex("h_\\d+,w_\\d+"), "h_800,w_800")
+        url.replace(Regex("h_\\d+,w_\\d+"), "h_1200,w_1200")
 
     private fun rialsToToman(rials: Long?): Long? {
         if (rials == null || rials <= 0) return null

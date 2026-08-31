@@ -198,6 +198,7 @@ fun SmartProductScreen(nav: NavHostController) {
     var catalogImageUrl by remember { mutableStateOf<String?>(null) }
     var catalogAwaiting by remember { mutableStateOf(false) }
     var searchLabel by remember { mutableStateOf("") }
+    var galleryFiles by remember { mutableStateOf<List<File>>(emptyList()) }
 
     var sites by remember { mutableStateOf(prefs.sites()) }
     val selectedSites = remember { mutableStateMapOf<Int, Boolean>().apply { sites.forEach { put(it.index, it.enabled && it.baseUrl.isNotBlank()) } } }
@@ -246,6 +247,7 @@ fun SmartProductScreen(nav: NavHostController) {
         processedFile = processed.file
         aiJpegFile = processed.aiJpeg
         backgroundRemoved = processed.backgroundRemoved
+        galleryFiles = listOf(processed.file)
         runAi(processed.aiJpeg)
         processed.warning?.let { warning ->
             message = listOfNotNull(message, warning).joinToString("\n")
@@ -327,6 +329,7 @@ fun SmartProductScreen(nav: NavHostController) {
         sourceUri = uri
         publishResults = emptyList(); localSaved = false; backgroundRemoved = false
         processedFile = null
+        galleryFiles = emptyList()
         catalogMatches = emptyList(); catalogDetail = null; catalogImageUrl = null
         catalogAwaiting = false; searchLabel = ""
         scope.launch {
@@ -361,21 +364,30 @@ fun SmartProductScreen(nav: NavHostController) {
     fun confirmCatalog() {
         val detail = catalogDetail ?: return
         val uri = sourceUri
-        val imageUrl = catalogImageUrl
+        val chosen = catalogImageUrl
         scope.launch {
-            busy = true; error = null; stage = "آماده‌سازی متن و عکس انتخاب‌شده…"
+            busy = true; error = null
             runCatching {
-                val downloaded = if (!imageUrl.isNullOrBlank()) {
-                    withContext(Dispatchers.IO) { IranianCatalogClient().downloadImage(ctx, imageUrl) }
-                } else null
-                val processed = when {
-                    downloaded != null -> ProductImageProcessor.prepareProductImage(ctx, downloaded, threshold.toInt())
-                    uri != null -> ProductImageProcessor.prepareProductImage(ctx, uri, threshold.toInt())
-                    else -> error("عکسی برای ثبت نیست.")
+                val urls = LinkedHashSet<String>()
+                chosen?.takeIf { it.isNotBlank() }?.let { urls += it }
+                detail.imageUrls.forEach { if (it.isNotBlank()) urls += it }
+                detail.match.imageUrl?.takeIf { it.isNotBlank() }?.let { urls += it }
+                require(urls.isNotEmpty() || uri != null) { "عکسی برای ثبت نیست." }
+                stage = "دانلود ${urls.size} عکس از صفحه کالا…"
+                val downloaded = if (urls.isNotEmpty()) {
+                    withContext(Dispatchers.IO) { IranianCatalogClient().downloadImages(ctx, urls.toList()) }
+                } else emptyList()
+                val files = if (downloaded.isNotEmpty()) downloaded else {
+                    stage = "آماده‌سازی عکس خودت…"
+                    val processed = ProductImageProcessor.prepareProductImage(ctx, uri!!, threshold.toInt())
+                    listOf(processed.file).also {
+                        aiJpegFile = processed.aiJpeg
+                        backgroundRemoved = processed.backgroundRemoved
+                    }
                 }
-                processedFile = processed.file
-                aiJpegFile = processed.aiJpeg
-                backgroundRemoved = processed.backgroundRemoved
+                galleryFiles = files
+                processedFile = files.first()
+                if (downloaded.isNotEmpty()) backgroundRemoved = false
                 name = detail.match.title
                 shortDescription = detail.shortDescription
                 description = detail.description
@@ -387,7 +399,7 @@ fun SmartProductScreen(nav: NavHostController) {
                     detail.priceToman?.takeIf { it > 0 }?.let { globalRegular = it.toString() }
                 }
                 catalogAwaiting = false
-                message = "متن و عکس از ${detail.match.source} پر شد. قبل از انتشار همه را چک کن."
+                message = "متن و ${files.size} عکس از ${detail.match.source} گرفته شد. با ثبت، همه به ووکامرس می‌روند."
             }.onFailure { error = it.message }
             busy = false; stage = ""
         }
@@ -402,6 +414,7 @@ fun SmartProductScreen(nav: NavHostController) {
                     processedFile = result.file
                     aiJpegFile = result.aiJpeg
                     backgroundRemoved = result.backgroundRemoved
+                    galleryFiles = listOf(result.file)
                     message = if (result.backgroundRemoved) {
                         "حذف پس‌زمینه انجام شد و WebP جدید آماده است."
                     } else {
@@ -460,7 +473,7 @@ fun SmartProductScreen(nav: NavHostController) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                DinalHero("از عکس تا ۳ فروشگاه", "نسخه ۱۶.۳.۲ — جستجو با خودِ عکس مثل گوگل لنز؛ اسم لازم نیست") {
+                DinalHero("از عکس تا ۳ فروشگاه", "نسخه ۱۶.۳.۳ — تأیید کالا همه عکس‌های صفحه را می‌گیرد و به ووکامرس می‌فرستد") {
                     Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(42.dp))
                 }
             }
@@ -474,6 +487,19 @@ fun SmartProductScreen(nav: NavHostController) {
                             leadingIcon = { Icon(if (backgroundRemoved) Icons.Rounded.CheckCircle else Icons.Rounded.Info, null, Modifier.size(16.dp)) }
                         )
                         Text("خانه‌های شطرنجی یعنی آن قسمت شفاف شده. لکه خاکستری یعنی هنوز مانده.")
+                        if (galleryFiles.size > 1) {
+                            Text("${galleryFiles.size} عکس از صفحه کالا گرفته شد؛ با ثبت همه به ووکامرس می‌روند.", fontWeight = FontWeight.SemiBold)
+                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                galleryFiles.forEach { file ->
+                                    AsyncImage(
+                                        model = file,
+                                        contentDescription = "عکس کالا",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.size(86.dp).clip(RoundedCornerShape(12.dp))
+                                    )
+                                }
+                            }
+                        }
                         Text("اگر لبه کالا خورده شد عدد را کم کن. انعکاس روی خودِ کالا پس‌زمینه نیست.")
                         Slider(value = threshold, onValueChange = { threshold = it }, valueRange = 20f..100f, enabled = !busy)
                         Text("حساسیت حذف پس‌زمینه: ${threshold.toInt()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -527,14 +553,14 @@ fun SmartProductScreen(nav: NavHostController) {
                                     )
                                 }
                             }
-                            Text("روی عکس بزن تا همان برای فروشگاه استفاده شود.", style = MaterialTheme.typography.bodySmall)
+                            Text("روی عکس بزن تا همان اولِ گالری باشد. با تأیید، همه ${detail.imageUrls.size} عکس صفحه گرفته می‌شود.", style = MaterialTheme.typography.bodySmall)
                         }
                         if (detail.priceToman != null && detail.priceToman > 0) {
                             Text("قیمت تقریبی بازار: ${toman(detail.priceToman.toDouble())}", style = MaterialTheme.typography.bodySmall)
                         }
                         Text(detail.description, style = MaterialTheme.typography.bodySmall, maxLines = 12, overflow = TextOverflow.Ellipsis)
                         Button(onClick = ::confirmCatalog, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.Rounded.CheckCircle, null); Spacer(Modifier.width(6.dp)); Text("همین کالاست؛ متن و عکس را بردار")
+                            Icon(Icons.Rounded.CheckCircle, null); Spacer(Modifier.width(6.dp)); Text("همین کالاست؛ متن و همه عکس‌ها را بردار")
                         }
                         OutlinedButton(onClick = { catalogDetail = null; catalogImageUrl = null }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                             Text("این نیست، برگرد به لیست")
@@ -629,7 +655,8 @@ fun SmartProductScreen(nav: NavHostController) {
                     Text("قبل از زدن دکمه، عکس، نام، توضیحات و قیمت‌ها را مرور کن. هیچ محصولی بدون تأیید این مرحله روی سایت ثبت نمی‌شود.", style = MaterialTheme.typography.bodySmall)
                     Button(
                         onClick = {
-                            val file = processedFile ?: return@Button
+                            val files = galleryFiles.ifEmpty { listOfNotNull(processedFile) }
+                            if (files.isEmpty()) return@Button
                             val targets = sites.filter { selectedSites[it.index] == true }
                             scope.launch {
                                 busy = true; error = null; message = null; publishResults = emptyList(); stage = "در حال انتشار روی سایت‌ها…"
@@ -653,7 +680,7 @@ fun SmartProductScreen(nav: NavHostController) {
                                                     tags = tags.split(',', '،').map { it.trim() }.filter { it.isNotBlank() },
                                                     regularPrice = reg, salePrice = sale, status = status
                                                 ),
-                                                file
+                                                files
                                             )
                                         }
                                     }
@@ -668,7 +695,7 @@ fun SmartProductScreen(nav: NavHostController) {
                                             ProductEntity(
                                                 name = name.trim(), sku = sku.trim().ifBlank { null },
                                                 price = if (sale > 0) sale else reg,
-                                                imageUrl = file.toURI().toString(), productUrl = success.permalink,
+                                                imageUrl = files.first().toURI().toString(), productUrl = success.permalink,
                                                 isEnabledForStore = true, category = category.trim().ifBlank { null },
                                                 source = ProductEntity.SOURCE_MANUAL
                                             ),
