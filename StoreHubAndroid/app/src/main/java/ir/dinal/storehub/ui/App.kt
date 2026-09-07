@@ -113,6 +113,7 @@ fun StoreHubRoot(activity: Activity, onSplashFinished: () -> Unit = {}) {
                     composable("publishing_settings") { PublishingSettingsScreen(nav) }
                     composable("assistant") { DinalAssistantScreen(nav) }
                     composable("inventory") { InventoryScreen(nav) }
+                    composable("alerts") { AlertsScreen(nav) }
                     composable("history") { HistoryScreen(nav) }
                     composable("pos") { PosScreen(activity, nav) }
                     composable("scanner") { ScannerScreen(nav) }
@@ -186,7 +187,7 @@ private fun HomeScreen(nav: NavHostController) {
                         }
                         Spacer(Modifier.height(12.dp))
                         Text("DINAL StoreHub", color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        Text("مدیریت فروشگاه روی گوشی", color = Color.White.copy(alpha = .82f), style = MaterialTheme.typography.bodyMedium)
+                        Text("مرجع موجودی فروشگاه روی گوشی", color = Color.White.copy(alpha = .82f), style = MaterialTheme.typography.bodyMedium)
                         Spacer(Modifier.height(12.dp))
                         Surface(color = Color.White.copy(alpha = .14f), shape = RoundedCornerShape(99.dp)) {
                             Row(Modifier.padding(horizontal = 14.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -206,13 +207,25 @@ private fun HomeScreen(nav: NavHostController) {
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 MetricCard("فروش امروز", toman(data?.todaySales ?: 0.0), DinalGold, Modifier.weight(1f))
-                MetricCard("کم‌موجود", (data?.lowStock ?: 0).toString(), DinalRose, Modifier.weight(1f))
+                MetricCard("کم‌موجود فروشگاه", (data?.lowStoreStock ?: data?.lowStock ?: 0).toString(), DinalRose, Modifier.weight(1f).clickable { nav.navigate("alerts") })
             }
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 MetricCard("کالای فعال", (data?.storeProducts ?: 0).toString(), DinalPurple, Modifier.weight(1f))
-                MetricCard("ناموجود", (data?.outOfStock ?: 0).toString(), MaterialTheme.colorScheme.error, Modifier.weight(1f))
+                MetricCard("ناموجود", (data?.outOfStock ?: 0).toString(), MaterialTheme.colorScheme.error, Modifier.weight(1f).clickable { nav.navigate("alerts") })
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MetricCard("کم‌موجود دپو", (data?.lowDepotStock ?: 0).toString(), DinalMint, Modifier.weight(1f).clickable { nav.navigate("alerts") })
+                MetricCard("بحرانی", (data?.criticalStock ?: 0).toString(), MaterialTheme.colorScheme.error, Modifier.weight(1f).clickable { nav.navigate("alerts") })
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MetricCard("پیشنهاد انتقال", (data?.transferRequired ?: 0).toString(), DinalGold, Modifier.weight(1f).clickable { nav.navigate("alerts") })
+                MetricCard("پیشنهاد خرید", (data?.purchaseRequired ?: 0).toString(), DinalRose, Modifier.weight(1f).clickable { nav.navigate("alerts") })
             }
         }
         item { ErrorText(error) }
@@ -227,6 +240,15 @@ private fun HomeScreen(nav: NavHostController) {
                         QuickAction("assistant", "دستیار", Icons.Rounded.SmartToy, DinalMint)
                     ), nav
                 )
+                Spacer(Modifier.height(8.dp))
+                QuickActionRow(
+                    listOf(
+                        QuickAction("purchases", "خرید", Icons.Rounded.ShoppingCart, DinalGold),
+                        QuickAction("inventory", "موجودی", Icons.Rounded.Warehouse, DinalPurple),
+                        QuickAction("transfers", "انتقال", Icons.Rounded.SwapHoriz, DinalRose),
+                        QuickAction("alerts", "هشدار", Icons.Rounded.NotificationsActive, DinalMint)
+                    ), nav
+                )
             }
         }
 
@@ -235,6 +257,7 @@ private fun HomeScreen(nav: NavHostController) {
                 ReminderLine(Icons.Rounded.ReceiptLong, "چک‌های نزدیک سررسید", (data?.dueChecks ?: 0).toString())
                 ReminderLine(Icons.Rounded.Event, "قرارهای امروز", (data?.todayAppointments ?: 0).toString())
                 ReminderLine(Icons.Rounded.LocalShipping, "انتقال‌های باز", (data?.pendingTransfers ?: 0).toString())
+                ReminderLine(Icons.Rounded.NotificationsActive, "اعلان‌های خوانده‌نشده", (data?.unreadAlerts ?: 0).toString())
                 FilledTonalButton(onClick = { refresh++ }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Rounded.Refresh, null); Spacer(Modifier.width(6.dp)); Text("تازه‌سازی داشبورد")
                 }
@@ -288,6 +311,7 @@ private fun MoreScreen(nav: NavHostController) {
         Triple("smart_product", "ثبت هوشمند محصول روی ۳ سایت", Icons.Rounded.AutoAwesome),
         Triple("publishing_settings", "اتصال ۳ سایت و هوش مصنوعی", Icons.Rounded.CloudUpload),
         Triple("inventory", "انبار و موجودی", Icons.Rounded.Warehouse),
+        Triple("alerts", "هشدار و پیشنهاد موجودی", Icons.Rounded.NotificationsActive),
         Triple("history", "تاریخچه موجودی", Icons.Rounded.History),
         Triple("sales", "فروش‌ها و مرجوعی", Icons.Rounded.Receipt),
         Triple("transfers", "انتقال دپو به مغازه", Icons.Rounded.SwapHoriz),

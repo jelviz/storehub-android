@@ -25,6 +25,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import ir.dinal.storehub.data.*
+import ir.dinal.storehub.inventory.AlertLevel
+import ir.dinal.storehub.inventory.TxType
 import ir.dinal.storehub.util.LabelPrinter
 import ir.dinal.storehub.util.PrinterPrefs
 import kotlinx.coroutines.delay
@@ -399,6 +401,7 @@ fun InventoryScreen(nav: NavHostController) {
     var warehouse by remember { mutableIntStateOf(LocalStore.WAREHOUSE_STORE) }
     var list by remember { mutableStateOf<List<InventoryRow>>(emptyList()) }
     var selected by remember { mutableStateOf<InventoryRow?>(null) }
+    var policyRow by remember { mutableStateOf<InventoryRow?>(null) }
     var err by remember { mutableStateOf<String?>(null) }
 
     suspend fun load() { list = store.inventory(warehouse) }
@@ -413,17 +416,35 @@ fun InventoryScreen(nav: NavHostController) {
             item { WarehousePicker(warehouse) { warehouse = it } }
             item { ErrorText(err) }
             items(list, key = { it.product.id }) { row ->
-                val low = row.quantity <= row.product.lowStockThreshold
+                val low = row.alertLevel != AlertLevel.NORMAL
                 Card(shape = RoundedCornerShape(18.dp)) {
-                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        ProductThumb(row.product, size = 62.dp)
-                        Spacer(Modifier.width(10.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(row.product.name, fontWeight = FontWeight.Bold)
-                            Text("موجودی: ${row.quantity}", color = if (low) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-                            Text("هشدار از ${row.product.lowStockThreshold} عدد", style = MaterialTheme.typography.bodySmall)
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            ProductThumb(row.product, size = 62.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(row.product.name, fontWeight = FontWeight.Bold)
+                                Text(
+                                    "قابل فروش: ${row.available.toQty()}",
+                                    color = if (low) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    "روی قفسه ${row.onHand.toQty()} • رزرو ${row.reserved.toQty()} • در مسیر ${row.inTransit.toQty()}",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    "${AlertLevel.label(row.alertLevel)} • حداقل ${row.minStock.toQty()} • هدف ${row.targetStock.toQty()}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text("ووکامرس ${row.wooAvailable.toQty()} • اسنپ ${row.storeChannelAvailable.toQty()}", style = MaterialTheme.typography.bodySmall)
+                            }
                         }
-                        FilledTonalButton(onClick = { selected = row }) { Text("تعدیل") }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(onClick = { selected = row }) { Text("تعدیل") }
+                            OutlinedButton(onClick = { policyRow = row }) { Text("حداقل / هدف") }
+                        }
                     }
                 }
             }
@@ -439,6 +460,15 @@ fun InventoryScreen(nav: NavHostController) {
             }
         }
     }
+    policyRow?.let { row ->
+        InventoryPolicyDialog(row, onDismiss = { policyRow = null }) { min, target, max, warn, crit, safety, reorder, total ->
+            scope.launch {
+                runCatching {
+                    store.updateStockPolicy(row.product.id, warehouse, min, target, max, warn, crit, safety, reorder, total)
+                }.onSuccess { policyRow = null; load() }.onFailure { err = it.message }
+            }
+        }
+    }
 }
 
 @Composable
@@ -450,12 +480,60 @@ private fun InventoryAdjustDialog(row: InventoryRow, onDismiss: () -> Unit, onSa
         title = { Text("تعدیل ${row.product.name}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("موجودی فعلی: ${row.quantity}")
+                Text("موجودی قابل فروش: ${row.available.toQty()}  •  روی قفسه: ${row.onHand.toQty()}")
                 OutlinedTextField(delta, { delta = it }, label = { Text("تغییر؛ مثال ۵ یا -۲") }, singleLine = true)
-                OutlinedTextField(note, { note = it }, label = { Text("علت / توضیح") })
+                OutlinedTextField(note, { note = it }, label = { Text("علت تعدیل (الزامی)") })
             }
         },
-        confirmButton = { Button({ delta.toDoubleOrNull()?.let { onSave(it, note.ifBlank { null }) } }) { Text("ثبت") } },
+        confirmButton = { Button({ delta.toDoubleOrNull()?.let { onSave(it, note.ifBlank { null }) } }, enabled = note.isNotBlank()) { Text("ثبت تراکنش") } },
+        dismissButton = { TextButton(onDismiss) { Text("انصراف") } }
+    )
+}
+
+@Composable
+private fun InventoryPolicyDialog(
+    row: InventoryRow,
+    onDismiss: () -> Unit,
+    onSave: (Double, Double, Double, Double, Double, Double, Double, Double) -> Unit
+) {
+    var min by remember { mutableStateOf(row.minStock.toQty()) }
+    var target by remember { mutableStateOf(row.targetStock.toQty()) }
+    var max by remember { mutableStateOf(row.maxStock.toQty()) }
+    var warn by remember { mutableStateOf(row.warningThreshold.toQty()) }
+    var crit by remember { mutableStateOf(row.criticalStock.toQty()) }
+    var safety by remember { mutableStateOf(row.safetyStock.toQty()) }
+    var reorder by remember { mutableStateOf(row.reorderPoint.toQty()) }
+    var total by remember { mutableStateOf(row.targetTotal.toQty()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("آستانه ${row.product.name}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (row.lastPurchaseCost > 0) Text("آخرین قیمت خرید: ${toman(row.lastPurchaseCost)}")
+                OutlinedTextField(warn, { warn = it }, label = { Text("آستانه هشدار") }, singleLine = true)
+                OutlinedTextField(min, { min = it }, label = { Text("حداقل") }, singleLine = true)
+                OutlinedTextField(crit, { crit = it }, label = { Text("بحرانی") }, singleLine = true)
+                OutlinedTextField(target, { target = it }, label = { Text("هدف فروشگاه") }, singleLine = true)
+                OutlinedTextField(max, { max = it }, label = { Text("حداکثر") }, singleLine = true)
+                OutlinedTextField(safety, { safety = it }, label = { Text("ذخیره اطمینان کانال") }, singleLine = true)
+                OutlinedTextField(reorder, { reorder = it }, label = { Text("نقطه سفارش کل") }, singleLine = true)
+                OutlinedTextField(total, { total = it }, label = { Text("هدف کل موجودی") }, singleLine = true)
+            }
+        },
+        confirmButton = {
+            Button({
+                onSave(
+                    min.toDoubleOrNull() ?: 0.0,
+                    target.toDoubleOrNull() ?: 0.0,
+                    max.toDoubleOrNull() ?: 0.0,
+                    warn.toDoubleOrNull() ?: 0.0,
+                    crit.toDoubleOrNull() ?: 0.0,
+                    safety.toDoubleOrNull() ?: 0.0,
+                    reorder.toDoubleOrNull() ?: 0.0,
+                    total.toDoubleOrNull() ?: 0.0
+                )
+            }) { Text("ذخیره آستانه") }
+        },
         dismissButton = { TextButton(onDismiss) { Text("انصراف") } }
     )
 }
@@ -475,7 +553,7 @@ fun HistoryScreen(nav: NavHostController) {
                 Card(shape = RoundedCornerShape(18.dp)) {
                     Column(Modifier.padding(12.dp)) {
                         Text(r.productName, fontWeight = FontWeight.Bold)
-                        Text("${LocalStore.warehouseName(r.movement.warehouseId)} • تغییر ${r.movement.quantityDelta} • مانده ${r.movement.balanceAfter}")
+                        Text("${LocalStore.warehouseName(r.movement.warehouseId)} • ${TxType.label(r.movement.type)} • ${r.movement.quantityDelta.toQty()} • مانده ${r.movement.balanceAfter.toQty()}")
                         r.movement.note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                 }

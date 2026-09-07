@@ -89,6 +89,7 @@ fun PurchasesScreen(nav: NavHostController) {
     val draft = remember { mutableStateListOf<PurchaseLineDraft>() }
     var supplier by remember { mutableStateOf("") }
     var mobile by remember { mutableStateOf("") }
+    var invoiceNo by remember { mutableStateOf("") }
     var date by remember { mutableStateOf(todayPersian()) }
     var warehouse by remember { mutableIntStateOf(LocalStore.WAREHOUSE_DEPOT) }
     var payment by remember { mutableIntStateOf(2) }
@@ -113,8 +114,9 @@ fun PurchasesScreen(nav: NavHostController) {
         ) {
             if (showForm) item {
                 SectionCard("ثبت خرید") {
-                    OutlinedTextField(supplier, { supplier = it }, label = { Text("فروشنده") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    OutlinedTextField(supplier, { supplier = it }, label = { Text("فروشنده / تأمین‌کننده") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     OutlinedTextField(mobile, { mobile = it }, label = { Text("موبایل فروشنده") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    OutlinedTextField(invoiceNo, { invoiceNo = it }, label = { Text("شماره فاکتور (اختیاری)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     PersianDateField("تاریخ خرید", date) { date = it }
                     WarehousePicker(warehouse) { warehouse = it }
                     PaymentPicker(payment) { payment = it }
@@ -145,7 +147,7 @@ fun PurchasesScreen(nav: NavHostController) {
                     Text("جمع خرید: ${toman(draft.sumOf { it.quantity * it.unitCost })}", fontWeight = FontWeight.Bold)
                     ErrorText(err)
                     Button(
-                        onClick = { scope.launch { runCatching { store.createPurchase(supplier, mobile, date, warehouse, payment, note, draft.toList()) }.onSuccess { draft.clear(); supplier = ""; mobile = ""; note = ""; showForm = false; load() }.onFailure { err = it.message } } },
+                        onClick = { scope.launch { runCatching { store.createPurchase(supplier, mobile, date, warehouse, payment, note, draft.toList(), invoiceNo) }.onSuccess { draft.clear(); supplier = ""; mobile = ""; invoiceNo = ""; note = ""; showForm = false; load() }.onFailure { err = it.message } } },
                         enabled = draft.isNotEmpty(), modifier = Modifier.fillMaxWidth()
                     ) { Text("ثبت خرید") }
                 }
@@ -158,7 +160,8 @@ fun PurchasesScreen(nav: NavHostController) {
                             Text(toman(d.purchase.total), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                         }
                         Text("${d.purchase.purchaseDatePersian} • ${LocalStore.warehouseName(d.purchase.warehouseId)}")
-                        Text(d.purchase.supplierName ?: "بدون نام فروشنده", style = MaterialTheme.typography.bodySmall)
+                        Text(d.supplier?.name ?: d.purchase.supplierName ?: "بدون نام فروشنده", style = MaterialTheme.typography.bodySmall)
+                        d.purchase.invoiceNumber?.let { Text("فاکتور $it", style = MaterialTheme.typography.bodySmall) }
                         d.items.take(4).forEach { Text("${it.name}: ${it.quantity} × ${toman(it.unitCost)}", style = MaterialTheme.typography.bodySmall) }
                         if (d.purchase.status == 1) {
                             Button({ scope.launch { runCatching { store.receivePurchase(d.purchase.id) }.onSuccess { load() }.onFailure { err = it.message } } }, Modifier.fillMaxWidth()) { Text("دریافت کالا و افزایش موجودی") }

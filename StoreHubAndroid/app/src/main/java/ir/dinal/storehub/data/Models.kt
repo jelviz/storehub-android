@@ -1,17 +1,96 @@
 package ir.dinal.storehub.data
 
-data class DashboardLocal(val products:Int,val storeProducts:Int,val lowStock:Int,val outOfStock:Int,val todaySales:Double,val pendingTransfers:Int,val dueChecks:Int,val todayAppointments:Int)
-data class InventoryRow(val product:ProductEntity,val warehouseId:Int,val quantity:Double)
+import ir.dinal.storehub.inventory.AlertLevel
+import ir.dinal.storehub.inventory.InventoryMath
+
+data class DashboardLocal(
+    val products:Int,
+    val storeProducts:Int,
+    val lowStock:Int,
+    val outOfStock:Int,
+    val todaySales:Double,
+    val pendingTransfers:Int,
+    val dueChecks:Int,
+    val todayAppointments:Int,
+    val lowStoreStock:Int=0,
+    val lowDepotStock:Int=0,
+    val transferRequired:Int=0,
+    val purchaseRequired:Int=0,
+    val criticalStock:Int=0,
+    val unreadAlerts:Int=0,
+    val failedSync:Int=0
+)
+data class InventoryRow(
+    val product:ProductEntity,
+    val warehouseId:Int,
+    val onHand:Double,
+    val reserved:Double=0.0,
+    val damaged:Double=0.0,
+    val inTransit:Double=0.0,
+    val available:Double=onHand,
+    val minStock:Double=0.0,
+    val targetStock:Double=0.0,
+    val maxStock:Double=0.0,
+    val warningThreshold:Double=0.0,
+    val criticalStock:Double=0.0,
+    val safetyStock:Double=0.0,
+    val reorderPoint:Double=0.0,
+    val targetTotal:Double=0.0,
+    val lastPurchaseCost:Double=0.0,
+    val alertLevel:String=AlertLevel.NORMAL,
+    val wooAvailable:Double=0.0,
+    val storeChannelAvailable:Double=0.0
+) {
+    val quantity: Double get() = available
+}
+fun InventoryEntity.toRow(product:ProductEntity, wooAvailable:Double=0.0, storeChannelAvailable:Double=0.0):InventoryRow {
+    val available = InventoryMath.available(quantity, reserved, damaged)
+    return InventoryRow(
+        product = product,
+        warehouseId = warehouseId,
+        onHand = quantity,
+        reserved = reserved,
+        damaged = damaged,
+        inTransit = inTransit,
+        available = available,
+        minStock = minStock,
+        targetStock = targetStock,
+        maxStock = maxStock,
+        warningThreshold = warningThreshold,
+        criticalStock = criticalStock,
+        safetyStock = safetyStock,
+        reorderPoint = reorderPoint,
+        targetTotal = targetTotal,
+        lastPurchaseCost = lastPurchaseCost,
+        alertLevel = InventoryMath.alertLevel(available, warningThreshold, minStock, criticalStock),
+        wooAvailable = wooAvailable,
+        storeChannelAvailable = storeChannelAvailable
+    )
+}
 data class MovementRow(val movement:InventoryMovementEntity,val productName:String)
 data class CartLine(val product:ProductEntity,val quantity:Double)
 data class SaleDetails(val sale:SaleEntity,val items:List<SaleItemEntity>)
 data class TransferDetails(val transfer:TransferEntity,val items:List<TransferItemEntity>)
 data class PurchaseLineDraft(val productId:Long,val name:String,val quantity:Double,val unitCost:Double)
-data class PurchaseDetails(val purchase:PurchaseEntity,val items:List<PurchaseItemEntity>)
+data class PurchaseDetails(val purchase:PurchaseEntity,val items:List<PurchaseItemEntity>,val supplier:SupplierEntity?=null)
 data class CalendarDataLocal(val checks:List<IssuedCheckEntity>,val appointments:List<AppointmentEntity>,val purchases:List<PurchaseEntity>)
 data class WooSettings(val baseUrl:String="",val apiVersion:String="wc/v3",val consumerKey:String="",val consumerSecret:String="",val autoSync:Boolean=false,val autoSyncMinutes:Int=60,val queryStringAuth:Boolean=false)
 data class WooTestResult(val success:Boolean,val message:String)
 data class WooSyncResult(val added:Int,val updated:Int,val failed:Int,val message:String)
+data class PriceIntelligence(
+    val lastPurchasePrice:Double=0.0,
+    val averagePurchasePrice30Days:Double=0.0,
+    val averagePurchasePrice90Days:Double=0.0,
+    val minimumPurchasePrice:Double=0.0,
+    val maximumPurchasePrice:Double=0.0,
+    val lastSalePrice:Double=0.0,
+    val lastSupplierName:String?=null
+)
+data class AlertCenter(
+    val notifications:List<AppNotificationEntity>,
+    val transfers:List<TransferSuggestionEntity>,
+    val purchases:List<PurchaseSuggestionEntity>
+)
 
 data class BackupPayload(
     val version:Int=1,
@@ -31,7 +110,14 @@ data class BackupPayload(
     val wooApiVersion:String="wc/v3",
     val wooAutoSync:Boolean=false,
     val wooAutoSyncMinutes:Int=60,
-    val wooQueryStringAuth:Boolean=false
+    val wooQueryStringAuth:Boolean=false,
+    val suppliers:List<SupplierEntity>?=null,
+    val mappings:List<ProductChannelMappingEntity>?=null,
+    val notifications:List<AppNotificationEntity>?=null,
+    val transferSuggestions:List<TransferSuggestionEntity>?=null,
+    val purchaseSuggestions:List<PurchaseSuggestionEntity>?=null,
+    val audits:List<AuditLogEntity>?=null,
+    val syncQueue:List<StockSyncQueueEntity>?=null
 )
 
 data class WooPublishSite(

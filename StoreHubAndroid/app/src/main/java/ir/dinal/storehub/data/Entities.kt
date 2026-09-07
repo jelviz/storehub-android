@@ -17,11 +17,30 @@ data class ProductEntity(
     val lowStockThreshold:Int=1,
     val category:String?=null,
     val source:Int=SOURCE_MANUAL,
-    val updatedAt:Long=System.currentTimeMillis()
+    val updatedAt:Long=System.currentTimeMillis(),
+    val isActive:Boolean=true,
+    val createdAt:Long=System.currentTimeMillis()
 ){ companion object { const val SOURCE_MANUAL=1; const val SOURCE_WOO=2 } }
 
 @Entity(primaryKeys=["productId","warehouseId"])
-data class InventoryEntity(val productId:Long,val warehouseId:Int,val quantity:Double=0.0)
+data class InventoryEntity(
+    val productId:Long,
+    val warehouseId:Int,
+    val quantity:Double=0.0,
+    val reserved:Double=0.0,
+    val damaged:Double=0.0,
+    val inTransit:Double=0.0,
+    val safetyStock:Double=0.0,
+    val minStock:Double=0.0,
+    val targetStock:Double=0.0,
+    val maxStock:Double=0.0,
+    val warningThreshold:Double=0.0,
+    val criticalStock:Double=0.0,
+    val reorderPoint:Double=0.0,
+    val targetTotal:Double=0.0,
+    val lastPurchaseCost:Double=0.0,
+    val version:Long=0
+)
 
 @Entity(indices=[Index("productId"),Index("createdAt")])
 data class InventoryMovementEntity(
@@ -33,7 +52,11 @@ data class InventoryMovementEntity(
     val balanceAfter:Double,
     val reference:String?=null,
     val note:String?=null,
-    val createdAt:Long=System.currentTimeMillis()
+    val createdAt:Long=System.currentTimeMillis(),
+    val beforeQuantity:Double=0.0,
+    val createdBy:String?=null,
+    val referenceType:String?=null,
+    val referenceId:Long=0
 )
 
 @Entity(indices=[Index(value=["invoiceNo"],unique=true),Index("createdAt")])
@@ -68,7 +91,11 @@ data class TransferEntity(
     val note:String?=null,
     val createdAt:Long=System.currentTimeMillis(),
     val dispatchedAt:Long?=null,
-    val receivedAt:Long?=null
+    val receivedAt:Long?=null,
+    val sourceWarehouseId:Int=2,
+    val destinationWarehouseId:Int=1,
+    val createdBy:String?=null,
+    val approvedAt:Long?=null
 )
 
 @Entity(indices=[Index("transferId"),Index("productId")])
@@ -92,7 +119,9 @@ data class PurchaseEntity(
     val total:Double,
     val status:Int=1,
     val note:String?=null,
-    val createdAt:Long=System.currentTimeMillis()
+    val createdAt:Long=System.currentTimeMillis(),
+    val supplierId:Long?=null,
+    val invoiceNumber:String?=null
 )
 
 @Entity(indices=[Index("purchaseId"),Index("productId")])
@@ -134,4 +163,109 @@ data class AppointmentEntity(
     val reminderMinutesBefore:Int=60,
     val status:Int=1,
     val note:String?=null
+)
+
+@Entity
+data class WarehouseEntity(
+    @PrimaryKey val id:Int,
+    val code:String,
+    val name:String,
+    val type:String,
+    val isActive:Boolean=true
+)
+
+@Entity(indices=[Index("name")])
+data class SupplierEntity(
+    @PrimaryKey(autoGenerate=true) val id:Long=0,
+    val name:String,
+    val phone:String?=null,
+    val address:String?=null,
+    val notes:String?=null
+)
+
+@Entity
+data class ChannelEntity(
+    @PrimaryKey val id:Long,
+    val code:String,
+    val name:String,
+    val type:String,
+    val integrationMode:String="DISABLED",
+    val isActive:Boolean=true
+)
+
+@Entity
+data class ChannelInventoryPolicyEntity(
+    @PrimaryKey val channelId:Long,
+    val policyType:String,
+    val safetyStock:Double=0.0
+)
+
+@Entity(primaryKeys=["productId","channelId"], indices=[Index(value=["channelId","externalProductId"])])
+data class ProductChannelMappingEntity(
+    val productId:Long,
+    val channelId:Long,
+    val externalProductId:String?=null,
+    val externalVariationId:String?=null,
+    val externalSku:String?=null
+)
+
+@Entity(indices=[Index("createdAt"), Index(value=["type","productId","warehouseId"])])
+data class AppNotificationEntity(
+    @PrimaryKey(autoGenerate=true) val id:Long=0,
+    val type:String,
+    val productId:Long=0,
+    val warehouseId:Int=0,
+    val message:String,
+    val severity:String,
+    val createdAt:Long=System.currentTimeMillis(),
+    val readAt:Long?=null,
+    val actionType:String?=null,
+    val actionReferenceId:Long=0
+)
+
+@Entity(indices=[Index("productId")])
+data class TransferSuggestionEntity(
+    @PrimaryKey(autoGenerate=true) val id:Long=0,
+    val productId:Long,
+    val sourceWarehouseId:Int,
+    val destinationWarehouseId:Int,
+    val quantity:Double,
+    val reason:String,
+    val status:String="OPEN",
+    val createdAt:Long=System.currentTimeMillis()
+)
+
+@Entity(indices=[Index("productId")])
+data class PurchaseSuggestionEntity(
+    @PrimaryKey(autoGenerate=true) val id:Long=0,
+    val productId:Long,
+    val quantity:Double,
+    val reason:String,
+    val status:String="OPEN",
+    val createdAt:Long=System.currentTimeMillis()
+)
+
+@Entity(indices=[Index("timestamp"), Index("entity")])
+data class AuditLogEntity(
+    @PrimaryKey(autoGenerate=true) val id:Long=0,
+    val userName:String="local",
+    val action:String,
+    val entity:String,
+    val entityId:Long,
+    val timestamp:Long=System.currentTimeMillis(),
+    val beforeJson:String?=null,
+    val afterJson:String?=null
+)
+
+@Entity(indices=[Index(value=["productId","channelId"], unique=true)])
+data class StockSyncQueueEntity(
+    @PrimaryKey(autoGenerate=true) val id:Long=0,
+    val productId:Long,
+    val channelId:Long,
+    val calculatedQuantity:Double,
+    val status:String="PENDING",
+    val retryCount:Int=0,
+    val lastAttemptAt:Long?=null,
+    val lastError:String?=null,
+    val createdAt:Long=System.currentTimeMillis()
 )

@@ -3,40 +3,110 @@ package ir.dinal.storehub.data
 import android.content.Context
 import android.net.Uri
 import androidx.room.withTransaction
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import ir.dinal.storehub.worker.ReminderScheduler
+import ir.dinal.storehub.inventory.AlertLevel
+import ir.dinal.storehub.inventory.ChannelIds
+import ir.dinal.storehub.inventory.InventoryMath
+import ir.dinal.storehub.inventory.InventoryService
+import ir.dinal.storehub.inventory.RefType
+import ir.dinal.storehub.inventory.StockMutation
+import ir.dinal.storehub.inventory.TxType
+import ir.dinal.storehub.inventory.WarehouseIds
 import ir.dinal.storehub.util.MoneyFormat
+import ir.dinal.storehub.worker.NotificationHelper
+import ir.dinal.storehub.worker.ReminderScheduler
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class LocalStore private constructor(private val context:Context){
     private val db=StoreDb.get(context); private val dao=db.dao()
+    private val inventory=InventoryService(dao){ id, title, text -> NotificationHelper.show(context, id, title, text) }
     companion object{
-        const val WAREHOUSE_STORE=1; const val WAREHOUSE_DEPOT=2
+        const val WAREHOUSE_STORE=WarehouseIds.STORE; const val WAREHOUSE_DEPOT=WarehouseIds.DEPOT
         @Volatile private var instance:LocalStore?=null
         fun get(context:Context)=instance?:synchronized(this){instance?:LocalStore(context.applicationContext).also{instance=it}}
         fun warehouseName(id:Int)=if(id==WAREHOUSE_DEPOT)"دپو" else "مغازه"
     }
 
     suspend fun dashboard():DashboardLocal{
-        val products=dao.products();val inv=dao.allInventory().associateBy{it.productId to it.warehouseId};val storeProducts=products.filter{it.isEnabledForStore};val qs=storeProducts.map{it to (inv[it.id to WAREHOUSE_STORE]?.quantity?:0.0)}
-        val start=LocalDate.now(ZoneId.of("Asia/Tehran")).atStartOfDay(ZoneId.of("Asia/Tehran")).toInstant().toEpochMilli();val todaySales=dao.sales().filter{it.createdAt>=start}.sumOf{it.total-it.returnedTotal}
-        val todayEpoch=LocalDate.now(ZoneId.of("Asia/Tehran")).toEpochDay();val due=dao.checks().count{it.status==1 && it.dueEpochDay<=todayEpoch+it.reminderDaysBefore && it.dueEpochDay>=todayEpoch-1}
+        val products=dao.products();val inv=dao.allInventory().associateBy{it.productId to it.warehouseId}
+        val storeProducts=products.filter{it.isEnabledForStore}
+        fun level(productId:Long, warehouseId:Int, fallbackMin:Double):String{
+            val row=inv[productId to warehouseId]
+            val available=InventoryMath.available(row?.quantity?:0.0, row?.reserved?:0.0, row?.damaged?:0.0)
+            val min=if((row?.minStock?:0.0)>0) row!!.minStock else fallbackMin
+            return InventoryMath.alertLevel(available, row?.warningThreshold?:min, min, row?.criticalStock?:0.0)
+        }
+        val storeLevels=storeProducts.map{level(it.id, WAREHOUSE_STORE, it.lowStockThreshold.toDouble())}
+        val depotLevels=products.map{level(it.id, WAREHOUSE_DEPOT, 0.0)}
+        val start=LocalDate.now(ZoneId.of("Asia/Tehran")).atStartOfDay(ZoneId.of("Asia/Tehran")).toInstant().toEpochMilli()
+        val todaySales=dao.sales().filter{it.createdAt>=start}.sumOf{it.total-it.returnedTotal}
+        val todayEpoch=LocalDate.now(ZoneId.of("Asia/Tehran")).toEpochDay()
+        val due=dao.checks().count{it.status==1 && it.dueEpochDay<=todayEpoch+it.reminderDaysBefore && it.dueEpochDay>=todayEpoch-1}
         val todayP=Jalali.format(Jalali.today());val ap=dao.appointments().count{it.status==1&&it.datePersian==todayP}
-        return DashboardLocal(products.size,storeProducts.size,qs.count{it.second<=it.first.lowStockThreshold&&it.second>0},qs.count{it.second<=0},todaySales,dao.transfers().count{it.status<3},due,ap)
+        val lowStore=storeLevels.count{it==AlertLevel.LOW || it==AlertLevel.WARNING}
+        val out=storeLevels.count{it==AlertLevel.OUT_OF_STOCK}
+        return DashboardLocal(
+            products=products.size,
+            storeProducts=storeProducts.size,
+            lowStock=lowStore,
+            outOfStock=out,
+            todaySales=todaySales,
+            pendingTransfers=dao.transfers().count{it.status<3},
+            dueChecks=due,
+            todayAppointments=ap,
+            lowStoreStock=lowStore,
+            lowDepotStock=depotLevels.count{it==AlertLevel.LOW || it==AlertLevel.WARNING || it==AlertLevel.CRITICAL},
+            transferRequired=dao.openTransferSuggestionCount(),
+            purchaseRequired=dao.openPurchaseSuggestionCount(),
+            criticalStock=storeLevels.count{it==AlertLevel.CRITICAL}+depotLevels.count{it==AlertLevel.CRITICAL},
+            unreadAlerts=dao.unreadNotificationCount(),
+            failedSync=dao.failedSyncCount()
+        )
     }
 
     suspend fun products(q:String="")=dao.products(q.trim())
     suspend fun saveProduct(p:ProductEntity,openingQuantity:Double=0.0):Long=db.withTransaction{
-        val id=if(p.id==0L){val x=dao.insertProduct(p.copy(internalCode=""));dao.setInternalCode(x,"M-$x");x}else{dao.updateProduct(p.copy(updatedAt=System.currentTimeMillis()));p.id}
-        if(p.isEnabledForStore){dao.enableStore(id);ensureInventory(id,WAREHOUSE_STORE);if(openingQuantity!=0.0)changeInventory(id,WAREHOUSE_STORE,openingQuantity,1,"OPENING","موجودی اولیه")}
+        val id=if(p.id==0L){val x=dao.insertProduct(p.copy(internalCode="", createdAt=if(p.createdAt==0L) System.currentTimeMillis() else p.createdAt));dao.setInternalCode(x,"M-$x");x}else{dao.updateProduct(p.copy(updatedAt=System.currentTimeMillis()));p.id}
+        if(p.isEnabledForStore){
+            dao.enableStore(id)
+            inventory.ensureInventory(id,WAREHOUSE_STORE)
+            if(openingQuantity!=0.0) inventory.mutate(id,WAREHOUSE_STORE, StockMutation(onHandDelta=openingQuantity), TxType.OPENING, RefType.OPENING, note="موجودی اولیه")
+        }
         id
     }
-    suspend fun enableStore(productId:Long,opening:Double)=db.withTransaction{dao.enableStore(productId);ensureInventory(productId,WAREHOUSE_STORE);if(opening!=0.0)changeInventory(productId,WAREHOUSE_STORE,opening,1,"ENABLE","فعال‌سازی کالا")}
+    suspend fun enableStore(productId:Long,opening:Double)=db.withTransaction{
+        dao.enableStore(productId)
+        inventory.ensureInventory(productId,WAREHOUSE_STORE)
+        if(opening!=0.0) inventory.mutate(productId,WAREHOUSE_STORE, StockMutation(onHandDelta=opening), TxType.OPENING, RefType.ENABLE, note="فعال‌سازی کالا")
+    }
 
-    suspend fun inventory(warehouseId:Int):List<InventoryRow>{val products=dao.products();val inv=dao.allInventory().associateBy{it.productId to it.warehouseId};return products.filter{if(warehouseId==WAREHOUSE_STORE)it.isEnabledForStore else true}.map{InventoryRow(it,warehouseId,inv[it.id to warehouseId]?.quantity?:0.0)}.sortedBy{it.product.name}}
-    suspend fun adjust(productId:Long,warehouseId:Int,delta:Double,note:String?)=db.withTransaction{changeInventory(productId,warehouseId,delta,2,"ADJUST",note,allowNegative=false)}
+    suspend fun inventory(warehouseId:Int):List<InventoryRow>{
+        val products=dao.products()
+        val inv=dao.allInventory().associateBy{it.productId to it.warehouseId}
+        val policies=dao.channelPolicies().associateBy{it.channelId}
+        fun availableAt(productId:Long, warehouseId:Int):Double{
+            val row=inv[productId to warehouseId]
+            return InventoryMath.available(row?.quantity?:0.0, row?.reserved?:0.0, row?.damaged?:0.0)
+        }
+        fun channelQty(productId:Long, channelId:Long):Double{
+            val policy=policies[channelId] ?: return 0.0
+            return InventoryMath.channelAvailable(policy.policyType, availableAt(productId, WAREHOUSE_STORE), availableAt(productId, WAREHOUSE_DEPOT), policy.safetyStock)
+        }
+        return products.filter{if(warehouseId==WAREHOUSE_STORE)it.isEnabledForStore else true}.map{ p ->
+            val row=inv[p.id to warehouseId] ?: InventoryEntity(p.id, warehouseId)
+            row.toRow(p, channelQty(p.id, ChannelIds.WOO_1), channelQty(p.id, ChannelIds.SNAPP))
+        }.sortedBy{it.product.name}
+    }
+    suspend fun adjust(productId:Long,warehouseId:Int,delta:Double,note:String?)=db.withTransaction{
+        require(!note.isNullOrBlank()){"برای تعدیل موجودی باید علت را بنویسی. عدد را مستقیم عوض نکن."}
+        inventory.mutate(productId, warehouseId, StockMutation(onHandDelta=delta), TxType.ADJUSTMENT, RefType.ADJUSTMENT, note=note)
+    }
+    suspend fun updateStockPolicy(
+        productId:Long, warehouseId:Int, minStock:Double, targetStock:Double, maxStock:Double,
+        warningThreshold:Double, criticalStock:Double, safetyStock:Double, reorderPoint:Double, targetTotal:Double
+    )=inventory.updatePolicy(productId, warehouseId, minStock, targetStock, maxStock, warningThreshold, criticalStock, safetyStock, reorderPoint, targetTotal)
     suspend fun movements(take:Int=400):List<MovementRow>{val names=dao.products().associate{it.id to it.name};return dao.movements(take).map{MovementRow(it,names[it.productId]?:"کالای حذف‌شده")}}
 
     suspend fun findByCode(code:String):ProductEntity? {
@@ -52,29 +122,122 @@ class LocalStore private constructor(private val context:Context){
     suspend fun checkout(lines:List<CartLine>,paymentType:Int,customerName:String?,customerMobile:String?):Long=db.withTransaction{
         require(lines.isNotEmpty()){"سبد فروش خالی است."}
         val normalized=lines.groupBy{it.product.id}.map{(_,x)->x.first().copy(quantity=x.sumOf{it.quantity})}
-        normalized.forEach{line->require(line.quantity>0);val q=dao.inventoryOne(line.product.id,WAREHOUSE_STORE)?.quantity?:0.0;require(q>=line.quantity){"موجودی ${line.product.name} کافی نیست."}}
-        val total=normalized.sumOf{it.product.price*it.quantity};val no="S-${System.currentTimeMillis()}";val saleId=dao.insertSale(SaleEntity(invoiceNo=no,total=total,paymentType=paymentType,customerName=customerName?.ifBlank{null},customerMobile=customerMobile?.ifBlank{null}))
+        normalized.forEach{line->
+            require(line.quantity>0)
+            val snap=inventory.snapshot(line.product.id, WAREHOUSE_STORE)
+            require(snap.available+0.000001>=line.quantity){"موجودی قابل فروش ${line.product.name} کافی نیست."}
+        }
+        val total=normalized.sumOf{it.product.price*it.quantity};val no="S-${System.currentTimeMillis()}"
+        val saleId=dao.insertSale(SaleEntity(invoiceNo=no,total=total,paymentType=paymentType,customerName=customerName?.ifBlank{null},customerMobile=customerMobile?.ifBlank{null}))
         dao.insertSaleItems(normalized.map{SaleItemEntity(saleId=saleId,productId=it.product.id,name=it.product.name,quantity=it.quantity,unitPrice=it.product.price,lineTotal=it.product.price*it.quantity)})
-        normalized.forEach{changeInventory(it.product.id,WAREHOUSE_STORE,-it.quantity,3,no,"فروش ${no}")};saleId
+        normalized.forEach{inventory.sellFromStore(it.product.id, it.quantity, saleId, no)}
+        saleId
     }
     suspend fun sales()=dao.sales()
     suspend fun saleDetails(id:Long)=dao.sale(id)?.let{SaleDetails(it,dao.saleItems(id))}
     suspend fun returnSale(saleId:Long,quantities:Map<Long,Double>,note:String?)=db.withTransaction{
         val sale=dao.sale(saleId)?:error("فاکتور پیدا نشد.");val items=dao.saleItems(saleId);var returnedValue=0.0
-        items.forEach{item->val qty=quantities[item.id]?:0.0;if(qty>0){require(qty<=item.quantity-item.returnedQuantity){"تعداد مرجوعی ${item.name} بیشتر از مانده قابل مرجوعی است."};dao.updateSaleItem(item.copy(returnedQuantity=item.returnedQuantity+qty));changeInventory(item.productId,WAREHOUSE_STORE,qty,4,sale.invoiceNo,"مرجوعی ${note.orEmpty()}");returnedValue+=qty*item.unitPrice}}
+        items.forEach{item->
+            val qty=quantities[item.id]?:0.0
+            if(qty>0){
+                require(qty<=item.quantity-item.returnedQuantity){"تعداد مرجوعی ${item.name} بیشتر از مانده قابل مرجوعی است."}
+                dao.updateSaleItem(item.copy(returnedQuantity=item.returnedQuantity+qty))
+                inventory.mutate(item.productId, WAREHOUSE_STORE, StockMutation(onHandDelta=qty), TxType.RETURN, RefType.SALE, saleId, sale.invoiceNo, "مرجوعی ${note.orEmpty()}")
+                returnedValue+=qty*item.unitPrice
+            }
+        }
         require(returnedValue>0){"تعداد مرجوعی وارد نشده است."};dao.updateSale(sale.copy(returnedTotal=sale.returnedTotal+returnedValue))
     }
 
     suspend fun transfers():List<TransferDetails> = dao.transfers().map{TransferDetails(it,dao.transferItems(it.id))}
-    suspend fun createTransfer(productId:Long,quantity:Double,note:String?):Long=db.withTransaction{require(quantity>0);val p=dao.product(productId)?:error("کالا پیدا نشد");val id=dao.insertTransfer(TransferEntity(transferNo="T-${System.currentTimeMillis()}",note=note));dao.insertTransferItems(listOf(TransferItemEntity(transferId=id,productId=productId,name=p.name,quantity=quantity)));id}
-    suspend fun dispatchTransfer(id:Long)=db.withTransaction{val t=dao.transfer(id)?:error("انتقال پیدا نشد");require(t.status==1){"این انتقال قابل خروج نیست."};val items=dao.transferItems(id);items.forEach{val q=dao.inventoryOne(it.productId,WAREHOUSE_DEPOT)?.quantity?:0.0;require(q>=it.quantity){"موجودی دپو برای ${it.name} کافی نیست."}};items.forEach{changeInventory(it.productId,WAREHOUSE_DEPOT,-it.quantity,5,t.transferNo,"خروج انتقال")};dao.updateTransfer(t.copy(status=2,dispatchedAt=System.currentTimeMillis()))}
-    suspend fun receiveTransfer(id:Long)=db.withTransaction{val t=dao.transfer(id)?:error("انتقال پیدا نشد");require(t.status==2){"ابتدا خروج از دپو را ثبت کن."};dao.transferItems(id).forEach{dao.enableStore(it.productId);changeInventory(it.productId,WAREHOUSE_STORE,it.quantity,6,t.transferNo,"دریافت انتقال")};dao.updateTransfer(t.copy(status=3,receivedAt=System.currentTimeMillis()))}
-
-    suspend fun purchases():List<PurchaseDetails> = dao.purchases().map{PurchaseDetails(it,dao.purchaseItems(it.id))}
-    suspend fun createPurchase(supplier:String?,mobile:String?,datePersian:String,warehouseId:Int,paymentType:Int,note:String?,items:List<PurchaseLineDraft>):Long=db.withTransaction{
-        require(Jalali.parse(datePersian)!=null){"تاریخ خرید نامعتبر است."};require(items.isNotEmpty()){"حداقل یک کالا اضافه کن."};val total=items.sumOf{it.quantity*it.unitCost};val id=dao.insertPurchase(PurchaseEntity(purchaseNo="P-${System.currentTimeMillis()}",supplierName=supplier?.ifBlank{null},supplierMobile=mobile?.ifBlank{null},purchaseDatePersian=datePersian,warehouseId=warehouseId,paymentType=paymentType,total=total,note=note));dao.insertPurchaseItems(items.map{PurchaseItemEntity(purchaseId=id,productId=it.productId,name=it.name,quantity=it.quantity,unitCost=it.unitCost,lineTotal=it.quantity*it.unitCost)});id
+    suspend fun createTransfer(productId:Long,quantity:Double,note:String?):Long=db.withTransaction{
+        require(quantity>0);val p=dao.product(productId)?:error("کالا پیدا نشد")
+        val id=dao.insertTransfer(TransferEntity(transferNo="T-${System.currentTimeMillis()}",note=note,sourceWarehouseId=WAREHOUSE_DEPOT,destinationWarehouseId=WAREHOUSE_STORE))
+        dao.insertTransferItems(listOf(TransferItemEntity(transferId=id,productId=productId,name=p.name,quantity=quantity)));id
     }
-    suspend fun receivePurchase(id:Long)=db.withTransaction{val p=dao.purchase(id)?:error("خرید پیدا نشد");require(p.status==1){"این خرید قبلاً دریافت شده است."};dao.purchaseItems(id).forEach{if(p.warehouseId==WAREHOUSE_STORE)dao.enableStore(it.productId);changeInventory(it.productId,p.warehouseId,it.quantity,7,p.purchaseNo,"دریافت خرید")};dao.updatePurchase(p.copy(status=2))}
+    suspend fun dispatchTransfer(id:Long)=db.withTransaction{
+        val t=dao.transfer(id)?:error("انتقال پیدا نشد");require(t.status==1){"این انتقال قابل خروج نیست."}
+        val items=dao.transferItems(id)
+        items.forEach{
+            val snap=inventory.snapshot(it.productId, WAREHOUSE_DEPOT)
+            require(snap.available+0.000001>=it.quantity){"موجودی دپو برای ${it.name} کافی نیست."}
+        }
+        items.forEach{
+            inventory.mutate(it.productId, WAREHOUSE_DEPOT, StockMutation(onHandDelta=-it.quantity), TxType.TRANSFER_OUT, RefType.TRANSFER, id, t.transferNo, "خروج انتقال")
+            inventory.mutate(it.productId, WAREHOUSE_STORE, StockMutation(inTransitDelta=it.quantity), TxType.TRANSFER_OUT, RefType.TRANSFER, id, t.transferNo, "در مسیر به مغازه")
+        }
+        dao.updateTransfer(t.copy(status=2,dispatchedAt=System.currentTimeMillis(),approvedAt=System.currentTimeMillis()))
+    }
+    suspend fun receiveTransfer(id:Long)=db.withTransaction{
+        val t=dao.transfer(id)?:error("انتقال پیدا نشد");require(t.status==2){"ابتدا خروج از دپو را ثبت کن."}
+        dao.transferItems(id).forEach{
+            dao.enableStore(it.productId)
+            val store=inventory.snapshot(it.productId, WAREHOUSE_STORE)
+            val transit=minOf(store.inTransit, it.quantity)
+            inventory.mutate(it.productId, WAREHOUSE_STORE, StockMutation(onHandDelta=it.quantity, inTransitDelta=-transit), TxType.TRANSFER_IN, RefType.TRANSFER, id, t.transferNo, "دریافت انتقال")
+        }
+        dao.updateTransfer(t.copy(status=3,receivedAt=System.currentTimeMillis()))
+    }
+
+    suspend fun purchases():List<PurchaseDetails> = dao.purchases().map{PurchaseDetails(it,dao.purchaseItems(it.id), it.supplierId?.let{sid->dao.supplier(sid)})}
+    suspend fun suppliers()=dao.suppliers()
+    suspend fun saveSupplier(id:Long=0, name:String, phone:String?, address:String?, notes:String?):Long{
+        require(name.isNotBlank()){"نام تأمین‌کننده لازم است."}
+        val e=SupplierEntity(id=id, name=name.trim(), phone=phone?.ifBlank{null}, address=address?.ifBlank{null}, notes=notes?.ifBlank{null})
+        return if(id==0L) dao.insertSupplier(e) else { dao.updateSupplier(e); id }
+    }
+    private suspend fun upsertSupplier(name:String?, phone:String?):Long?{
+        val n=name?.trim().orEmpty(); if(n.isBlank()) return null
+        val mobile=phone?.ifBlank{null}
+        dao.supplierByNamePhone(n, mobile.orEmpty())?.let{return it.id}
+        return dao.insertSupplier(SupplierEntity(name=n, phone=mobile))
+    }
+    suspend fun createPurchase(supplier:String?,mobile:String?,datePersian:String,warehouseId:Int,paymentType:Int,note:String?,items:List<PurchaseLineDraft>,invoiceNumber:String?=null):Long=db.withTransaction{
+        require(Jalali.parse(datePersian)!=null){"تاریخ خرید نامعتبر است."};require(items.isNotEmpty()){"حداقل یک کالا اضافه کن."}
+        val supplierId=upsertSupplier(supplier, mobile)
+        val total=items.sumOf{it.quantity*it.unitCost}
+        val id=dao.insertPurchase(PurchaseEntity(purchaseNo="P-${System.currentTimeMillis()}",supplierName=supplier?.ifBlank{null},supplierMobile=mobile?.ifBlank{null},purchaseDatePersian=datePersian,warehouseId=warehouseId,paymentType=paymentType,total=total,note=note,supplierId=supplierId,invoiceNumber=invoiceNumber?.ifBlank{null}))
+        dao.insertPurchaseItems(items.map{PurchaseItemEntity(purchaseId=id,productId=it.productId,name=it.name,quantity=it.quantity,unitCost=it.unitCost,lineTotal=it.quantity*it.unitCost)});id
+    }
+    suspend fun receivePurchase(id:Long)=db.withTransaction{
+        val p=dao.purchase(id)?:error("خرید پیدا نشد");require(p.status==1){"این خرید قبلاً دریافت شده است."}
+        dao.purchaseItems(id).forEach{
+            if(p.warehouseId==WAREHOUSE_STORE) dao.enableStore(it.productId)
+            inventory.mutate(it.productId, p.warehouseId, StockMutation(onHandDelta=it.quantity), TxType.PURCHASE, RefType.PURCHASE, id, p.purchaseNo, "دریافت خرید", lastPurchaseCost=it.unitCost)
+        }
+        dao.updatePurchase(p.copy(status=2))
+    }
+
+    suspend fun lastSupplier(productId:Long)=dao.lastSupplierForProduct(productId)
+    suspend fun priceIntelligence(productId:Long):PriceIntelligence{
+        val purchases=dao.purchases().filter{it.status==2}
+        val now=System.currentTimeMillis()
+        val costs=ArrayList<Pair<Long,Double>>()
+        purchases.forEach{ p ->
+            dao.purchaseItems(p.id).filter{it.productId==productId && it.unitCost>0}.forEach{ costs += p.createdAt to it.unitCost }
+        }
+        fun avg(since:Long):Double{
+            val slice=costs.filter{it.first>=since}.map{it.second}
+            return if(slice.isEmpty()) 0.0 else slice.average()
+        }
+        val inv=dao.allInventory().filter{it.productId==productId && it.lastPurchaseCost>0}
+        val lastCost=inv.maxOfOrNull{it.lastPurchaseCost} ?: costs.maxByOrNull{it.first}?.second ?: 0.0
+        return PriceIntelligence(
+            lastPurchasePrice=lastCost,
+            averagePurchasePrice30Days=avg(now-30L*24*60*60*1000),
+            averagePurchasePrice90Days=avg(now-90L*24*60*60*1000),
+            minimumPurchasePrice=costs.minOfOrNull{it.second}?:0.0,
+            maximumPurchasePrice=costs.maxOfOrNull{it.second}?:0.0,
+            lastSalePrice=dao.lastSalePrices(productId).firstOrNull()?:0.0,
+            lastSupplierName=dao.lastSupplierForProduct(productId)?.name ?: purchases.firstOrNull{ p -> dao.purchaseItems(p.id).any{it.productId==productId} }?.supplierName
+        )
+    }
+
+    suspend fun alerts(refresh:Boolean=false):AlertCenter{
+        if(refresh) inventory.evaluateAllAlerts()
+        return AlertCenter(dao.notifications(), dao.openTransferSuggestions(), dao.openPurchaseSuggestions())
+    }
+    suspend fun markAlertRead(id:Long)=dao.markNotificationRead(id, System.currentTimeMillis())
 
     suspend fun checks()=dao.checks()
     suspend fun saveCheck(id:Long=0,title:String,bank:String?,number:String?,payee:String?,amount:Double,duePersian:String,reminderDays:Int,status:Int=1,note:String?):Long{
@@ -100,7 +263,19 @@ class LocalStore private constructor(private val context:Context){
     suspend fun syncWoo(onPage:((Int)->Unit)?=null):WooSyncResult=withContext(Dispatchers.IO){
         val settings=WooPrefs(context).settings();val remote=WooClient(settings).fetchAll(onPage);var add=0;var update=0;var failed=0
         db.withTransaction{
-            remote.forEach{w->runCatching{val old=dao.productByWooId(w.wooId);if(old==null){val id=dao.insertProduct(ProductEntity(wooId=w.wooId,name=w.name,sku=w.sku,barcode=w.barcode,internalCode="",price=w.price,imageUrl=w.imageUrl,productUrl=w.productUrl,category=w.category,source=ProductEntity.SOURCE_WOO));dao.setInternalCode(id,"W-${w.wooId}");add++}else{dao.updateProduct(old.copy(name=w.name,sku=w.sku,barcode=w.barcode?:old.barcode,price=w.price,imageUrl=w.imageUrl,productUrl=w.productUrl?:old.productUrl,category=w.category,source=ProductEntity.SOURCE_WOO,updatedAt=System.currentTimeMillis()));update++}}.onFailure{failed++}}
+            remote.forEach{w->runCatching{
+                val old=dao.productByWooId(w.wooId)
+                if(old==null){
+                    val id=dao.insertProduct(ProductEntity(wooId=w.wooId,name=w.name,sku=w.sku,barcode=w.barcode,internalCode="",price=w.price,imageUrl=w.imageUrl,productUrl=w.productUrl,category=w.category,source=ProductEntity.SOURCE_WOO))
+                    dao.setInternalCode(id,"W-${w.wooId}")
+                    inventory.upsertWooMapping(id, w.wooId, w.sku)
+                    add++
+                }else{
+                    dao.updateProduct(old.copy(name=w.name,sku=w.sku,barcode=w.barcode?:old.barcode,price=w.price,imageUrl=w.imageUrl,productUrl=w.productUrl?:old.productUrl,category=w.category,source=ProductEntity.SOURCE_WOO,updatedAt=System.currentTimeMillis()))
+                    inventory.upsertWooMapping(old.id, w.wooId, w.sku)
+                    update++
+                }
+            }.onFailure{failed++}}
         }
         WooSyncResult(add,update,failed,"${remote.size} کالا از ووکامرس دریافت شد. موجودی محلی تغییر نکرد.")
     }
@@ -125,11 +300,11 @@ class LocalStore private constructor(private val context:Context){
         fun score(row:InventoryRow):Int{
             val hay=listOfNotNull(row.product.name,row.product.sku,row.product.barcode,row.product.category,row.product.internalCode)
                 .joinToString(" ").lowercase()
-            return (tokens.count { hay.contains(it) } * 3) + if (row.quantity <= row.product.lowStockThreshold) 1 else 0
+            return (tokens.count { hay.contains(it) } * 3) + if (row.alertLevel != AlertLevel.NORMAL) 1 else 0
         }
 
         val matched=storeRows.map{it to score(it)}.filter{it.second>0}.sortedByDescending{it.second}.take(40).map{it.first}
-        val focusRows=(if(matched.isNotEmpty()) matched else storeRows.sortedWith(compareBy<InventoryRow>{it.quantity>it.product.lowStockThreshold}.thenBy{it.quantity}).take(35))
+        val focusRows=(if(matched.isNotEmpty()) matched else storeRows.sortedWith(compareBy<InventoryRow>{it.alertLevel==AlertLevel.NORMAL}.thenBy{it.available}).take(35))
 
         val today=LocalDate.now(ZoneId.of("Asia/Tehran")).toEpochDay()
         val openChecks=checks().filter{it.status==1}.sortedBy{it.dueEpochDay}.take(15)
@@ -140,13 +315,13 @@ class LocalStore private constructor(private val context:Context){
         fun money(v:Double)=MoneyFormat.tomanPlain(v)
         return buildString{
             appendLine("تاریخ امروز: ${Jalali.format(Jalali.today())}")
-            appendLine("کالاها: ${dash.products} | فعال مغازه: ${dash.storeProducts} | کم‌موجود: ${dash.lowStock} | ناموجود: ${dash.outOfStock}")
-            appendLine("فروش امروز: ${money(dash.todaySales)} | انتقال باز: ${dash.pendingTransfers} | چک نزدیک سررسید: ${dash.dueChecks} | قرار امروز: ${dash.todayAppointments}")
+            appendLine("کالاها: ${dash.products} | فعال مغازه: ${dash.storeProducts} | کم‌موجود فروشگاه: ${dash.lowStoreStock} | ناموجود: ${dash.outOfStock} | کم‌موجود دپو: ${dash.lowDepotStock}")
+            appendLine("فروش امروز: ${money(dash.todaySales)} | انتقال باز: ${dash.pendingTransfers} | پیشنهاد انتقال: ${dash.transferRequired} | پیشنهاد خرید: ${dash.purchaseRequired}")
             appendLine()
-            appendLine("کالاهای مرتبط/مهم (نام | کد | قیمت | مغازه | دپو):")
+            appendLine("کالاهای مرتبط/مهم (نام | کد | قیمت | قابل‌فروش مغازه | دپو | رزرو):")
             focusRows.forEach{r->
-                val depot=depotById[r.product.id]?.quantity?:0.0
-                appendLine("- ${r.product.name} | ${r.product.internalCode} | ${money(r.product.price)} | ${r.quantity} | $depot")
+                val depot=depotById[r.product.id]
+                appendLine("- ${r.product.name} | ${r.product.internalCode} | ${money(r.product.price)} | ${r.available} | ${depot?.available?:0.0} | ${r.reserved}")
             }
             if(openChecks.isNotEmpty()){
                 appendLine()
@@ -170,7 +345,4 @@ class LocalStore private constructor(private val context:Context){
             }
         }
     }
-
-    private suspend fun ensureInventory(productId:Long,warehouseId:Int){if(dao.inventoryOne(productId,warehouseId)==null)dao.upsertInventory(InventoryEntity(productId,warehouseId,0.0))}
-    private suspend fun changeInventory(productId:Long,warehouseId:Int,delta:Double,type:Int,reference:String?,note:String?,allowNegative:Boolean=false){val cur=dao.inventoryOne(productId,warehouseId)?.quantity?:0.0;val next=cur+delta;if(!allowNegative)require(next>=-0.000001){"موجودی نمی‌تواند منفی شود."};dao.upsertInventory(InventoryEntity(productId,warehouseId,next));dao.movement(InventoryMovementEntity(productId=productId,warehouseId=warehouseId,type=type,quantityDelta=delta,balanceAfter=next,reference=reference,note=note))}
 }

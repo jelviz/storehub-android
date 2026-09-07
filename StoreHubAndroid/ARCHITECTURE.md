@@ -6,10 +6,15 @@
 - WorkManager/AlarmManager برای کارهای زمان‌بندی‌شده
 - Android Keystore برای credentialهای WooCommerce/OpenAI
 
+## موجودی (V16.4)
+StoreHub مرجع موجودی است. هر انبار OnHand / Reserved / Damaged / InTransit دارد.
+Available = OnHand - Reserved - Damaged.
+تغییر موجودی فقط با Inventory Transaction است. کانال آنلاین موجودی را تعیین نمی‌کند.
+
 ## WooCommerce
 Android App → HTTPS → WooCommerce REST API
 
-WooCommerce منبع کاتالوگ و مقصد انتشار محصول است. موجودی مغازه در Room مستقل می‌ماند.
+WooCommerce منبع کاتالوگ و مقصد انتشار محصول است. موجودی مغازه در Room مستقل می‌ماند و در Phase 2 از روی ChannelInventoryPolicy به کانال‌ها push می‌شود.
 
 ## DINAL Assistant
 Android App → OpenAI Responses API

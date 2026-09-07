@@ -18,6 +18,7 @@ import androidx.navigation.NavHostController
 import ir.dinal.storehub.data.*
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PosScreen(activity: Activity, nav: NavHostController) {
     val ctx = LocalContext.current
@@ -25,6 +26,8 @@ fun PosScreen(activity: Activity, nav: NavHostController) {
     val scope = rememberCoroutineScope()
     val cart = remember { mutableStateListOf<CartLine>() }
     var code by remember { mutableStateOf("") }
+    var nameQuery by remember { mutableStateOf("") }
+    var products by remember { mutableStateOf<List<ProductEntity>>(emptyList()) }
     var customer by remember { mutableStateOf("") }
     var mobile by remember { mutableStateOf("") }
     var payment by remember { mutableIntStateOf(2) }
@@ -59,13 +62,16 @@ fun PosScreen(activity: Activity, nav: NavHostController) {
             posEntry.savedStateHandle["scan_result"] = ""
         }
     }
+    LaunchedEffect(nameQuery) {
+        products = store.products(nameQuery).filter { it.isEnabledForStore }.take(40)
+    }
 
     DinalScreen(nav, "صندوق فروش", showBack = false) { pad ->
         Column(
             Modifier.padding(pad).fillMaxSize().imePadding().padding(horizontal = 14.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            DinalHero("فروش سریع", "اسکن کن، تعداد را تنظیم کن و فروش را ثبت کن") {
+            DinalHero("فروش سریع", "جستجو، اسکن یا کد کالا؛ موجودی فقط از فروشگاه کم می‌شود") {
                 Icon(Icons.Rounded.PointOfSale, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(42.dp))
             }
 
@@ -81,6 +87,27 @@ fun PosScreen(activity: Activity, nav: NavHostController) {
                 FilledTonalIconButton(onClick = { lookup(code) }) { Icon(Icons.Rounded.AddShoppingCart, "افزودن") }
                 Button(onClick = { nav.navigate("scanner") }, contentPadding = PaddingValues(horizontal = 14.dp, vertical = 14.dp)) {
                     Icon(Icons.Rounded.QrCodeScanner, null); Spacer(Modifier.width(5.dp)); Text("اسکن")
+                }
+            }
+
+            OutlinedTextField(
+                value = nameQuery,
+                onValueChange = { nameQuery = it },
+                label = { Text("جستجو با نام / دسته") },
+                leadingIcon = { Icon(Icons.Rounded.Search, null) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            if (nameQuery.isNotBlank() && products.isNotEmpty()) {
+                products.take(8).forEach { p ->
+                    Surface(onClick = { addProduct(p); nameQuery = "" }, shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .6f)) {
+                        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            ProductThumb(p, size = 40.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text(p.name, Modifier.weight(1f), fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            Icon(Icons.Rounded.Add, null)
+                        }
+                    }
                 }
             }
 

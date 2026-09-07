@@ -473,7 +473,7 @@ fun SmartProductScreen(nav: NavHostController) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                DinalHero("از عکس تا ۳ فروشگاه", "نسخه ۱۶.۳.۳ — تأیید کالا همه عکس‌های صفحه را می‌گیرد و به ووکامرس می‌فرستد") {
+                DinalHero("از عکس تا ۳ فروشگاه", "نسخه ۱۶.۴.۰ — موجودی مرجع StoreHub است؛ تأیید کالا همه عکس‌های صفحه را به ووکامرس می‌فرستد") {
                     Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(42.dp))
                 }
             }
