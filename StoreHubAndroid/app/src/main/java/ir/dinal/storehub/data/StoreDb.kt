@@ -19,9 +19,10 @@ import ir.dinal.storehub.inventory.WarehouseType
         PurchaseEntity::class, PurchaseItemEntity::class, IssuedCheckEntity::class, AppointmentEntity::class,
         WarehouseEntity::class, SupplierEntity::class, ChannelEntity::class, ChannelInventoryPolicyEntity::class,
         ProductChannelMappingEntity::class, AppNotificationEntity::class, TransferSuggestionEntity::class,
-        PurchaseSuggestionEntity::class, AuditLogEntity::class, StockSyncQueueEntity::class
+        PurchaseSuggestionEntity::class, AuditLogEntity::class, StockSyncQueueEntity::class,
+        ShopOrderEntity::class, ShopOrderItemEntity::class, StocktakeSessionEntity::class, StocktakeItemEntity::class
     ],
-    version=3,
+    version=4,
     exportSchema=false
 )
 abstract class StoreDb:RoomDatabase(){
@@ -101,6 +102,28 @@ abstract class StoreDb:RoomDatabase(){
             }
         }
 
+        private val MIGRATION_3_4=object:Migration(3,4){
+            override fun migrate(db:SupportSQLiteDatabase){
+                createPhase2Tables(db)
+            }
+        }
+
+        private fun createPhase2Tables(db:SupportSQLiteDatabase){
+            db.execSQL("CREATE TABLE IF NOT EXISTS `ShopOrderEntity` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `orderNo` TEXT NOT NULL, `channelId` INTEGER NOT NULL, `externalOrderId` TEXT NOT NULL, `externalStatus` TEXT NOT NULL, `status` TEXT NOT NULL, `customerName` TEXT, `customerMobile` TEXT, `shippingAddress` TEXT, `total` REAL NOT NULL, `note` TEXT, `createdAt` INTEGER NOT NULL, `importedAt` INTEGER NOT NULL, `reservedAt` INTEGER, `pickedAt` INTEGER, `packedAt` INTEGER, `shippedAt` INTEGER, `cancelledAt` INTEGER)")
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_ShopOrderEntity_channelId_externalOrderId` ON `ShopOrderEntity` (`channelId`, `externalOrderId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_ShopOrderEntity_status` ON `ShopOrderEntity` (`status`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_ShopOrderEntity_createdAt` ON `ShopOrderEntity` (`createdAt`)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS `ShopOrderItemEntity` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `orderId` INTEGER NOT NULL, `productId` INTEGER NOT NULL, `name` TEXT NOT NULL, `sku` TEXT, `externalProductId` TEXT, `externalVariationId` TEXT, `quantity` REAL NOT NULL, `unitPrice` REAL NOT NULL, `lineTotal` REAL NOT NULL, `reservedStoreQty` REAL NOT NULL, `waitingDepotQty` REAL NOT NULL, `shortageQty` REAL NOT NULL, `pickedQty` REAL NOT NULL, `packedQty` REAL NOT NULL)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_ShopOrderItemEntity_orderId` ON `ShopOrderItemEntity` (`orderId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_ShopOrderItemEntity_productId` ON `ShopOrderItemEntity` (`productId`)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS `StocktakeSessionEntity` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `sessionNo` TEXT NOT NULL, `warehouseId` INTEGER NOT NULL, `status` TEXT NOT NULL, `note` TEXT, `createdAt` INTEGER NOT NULL, `confirmedAt` INTEGER)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_StocktakeSessionEntity_status` ON `StocktakeSessionEntity` (`status`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_StocktakeSessionEntity_createdAt` ON `StocktakeSessionEntity` (`createdAt`)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS `StocktakeItemEntity` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `sessionId` INTEGER NOT NULL, `productId` INTEGER NOT NULL, `name` TEXT NOT NULL, `systemQty` REAL NOT NULL, `countedQty` REAL NOT NULL, `hint` TEXT)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_StocktakeItemEntity_sessionId` ON `StocktakeItemEntity` (`sessionId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_StocktakeItemEntity_productId` ON `StocktakeItemEntity` (`productId`)")
+        }
+
         private fun createPhase1Tables(db:SupportSQLiteDatabase){
             db.execSQL("CREATE TABLE IF NOT EXISTS `WarehouseEntity` (`id` INTEGER NOT NULL, `code` TEXT NOT NULL, `name` TEXT NOT NULL, `type` TEXT NOT NULL, `isActive` INTEGER NOT NULL, PRIMARY KEY(`id`))")
             db.execSQL("CREATE TABLE IF NOT EXISTS `SupplierEntity` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `phone` TEXT, `address` TEXT, `notes` TEXT)")
@@ -142,7 +165,7 @@ abstract class StoreDb:RoomDatabase(){
 
         fun get(context:Context):StoreDb=instance?:synchronized(this){
             instance?:Room.databaseBuilder(context.applicationContext,StoreDb::class.java,"storehub-local.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .addCallback(object:Callback(){
                     override fun onCreate(db:SupportSQLiteDatabase){ seedMasterData(db) }
                     override fun onOpen(db:SupportSQLiteDatabase){ seedMasterData(db) }

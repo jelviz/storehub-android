@@ -127,6 +127,12 @@ fun StoreHubRoot(activity: Activity, onSplashFinished: () -> Unit = {}) {
                     composable("sync") { SyncScreen(nav) }
                     composable("settings") { SettingsScreen(activity, nav) }
                     composable("printer") { PrinterSettingsScreen(activity, nav) }
+                    composable("orders") { OnlineOrdersScreen(nav) }
+                    composable("fulfillment") { FulfillmentQueueScreen(nav) }
+                    composable("stocktake") { PhotoStocktakeScreen(nav) }
+                    composable("photo_purchase") { PhotoPurchaseScreen(nav) }
+                    composable("photo_price") { PhotoPriceLookupScreen(nav) }
+                    composable("channel_stock") { ChannelStockScreen(nav) }
                     composable("more") { MoreScreen(nav) }
                 }
             }
@@ -228,7 +234,33 @@ private fun HomeScreen(nav: NavHostController) {
                 MetricCard("پیشنهاد خرید", (data?.purchaseRequired ?: 0).toString(), DinalRose, Modifier.weight(1f).clickable { nav.navigate("alerts") })
             }
         }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MetricCard("سفارش باز", (data?.openOrders ?: 0).toString(), DinalPurple, Modifier.weight(1f).clickable { nav.navigate("orders") })
+                MetricCard("صف ارسال", (data?.fulfillmentQueue ?: 0).toString(), DinalGold, Modifier.weight(1f).clickable { nav.navigate("fulfillment") })
+            }
+        }
         item { ErrorText(error) }
+
+        item {
+            Card(
+                onClick = { nav.navigate("photo_price") },
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = DinalMint.copy(alpha = .16f))
+            ) {
+                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(shape = RoundedCornerShape(16.dp), color = DinalMint.copy(alpha = .22f)) {
+                        Icon(Icons.Rounded.PhotoCamera, null, tint = DinalMint, modifier = Modifier.padding(10.dp).size(26.dp))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("قیمت با عکس", fontWeight = FontWeight.Bold)
+                        Text("مشتری حضوری آمد؛ عکس بگیر تا قیمت و موجودی فروشگاه خودت را ببینی", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Icon(Icons.Rounded.ChevronLeft, null)
+                }
+            }
+        }
 
         item {
             SectionCard("دسترسی سریع", subtitle = "کارهای روزمره فروشگاه") {
@@ -249,6 +281,15 @@ private fun HomeScreen(nav: NavHostController) {
                         QuickAction("alerts", "هشدار", Icons.Rounded.NotificationsActive, DinalMint)
                     ), nav
                 )
+                Spacer(Modifier.height(8.dp))
+                QuickActionRow(
+                    listOf(
+                        QuickAction("orders", "سفارش", Icons.Rounded.LocalShipping, DinalPurple),
+                        QuickAction("fulfillment", "چیدن", Icons.Rounded.Inventory2, DinalRose),
+                        QuickAction("stocktake", "انبارگردانی", Icons.Rounded.Checklist, DinalGold),
+                        QuickAction("photo_purchase", "خرید عکس", Icons.Rounded.AddAPhoto, DinalMint)
+                    ), nav
+                )
             }
         }
 
@@ -257,6 +298,7 @@ private fun HomeScreen(nav: NavHostController) {
                 ReminderLine(Icons.Rounded.ReceiptLong, "چک‌های نزدیک سررسید", (data?.dueChecks ?: 0).toString())
                 ReminderLine(Icons.Rounded.Event, "قرارهای امروز", (data?.todayAppointments ?: 0).toString())
                 ReminderLine(Icons.Rounded.LocalShipping, "انتقال‌های باز", (data?.pendingTransfers ?: 0).toString())
+                ReminderLine(Icons.Rounded.ShoppingBag, "سفارش‌های باز", (data?.openOrders ?: 0).toString())
                 ReminderLine(Icons.Rounded.NotificationsActive, "اعلان‌های خوانده‌نشده", (data?.unreadAlerts ?: 0).toString())
                 FilledTonalButton(onClick = { refresh++ }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Rounded.Refresh, null); Spacer(Modifier.width(6.dp)); Text("تازه‌سازی داشبورد")
@@ -310,6 +352,12 @@ private fun MoreScreen(nav: NavHostController) {
         Triple("assistant", "دستیار هوشمند DINAL", Icons.Rounded.SmartToy),
         Triple("smart_product", "ثبت هوشمند محصول روی ۳ سایت", Icons.Rounded.AutoAwesome),
         Triple("publishing_settings", "اتصال ۳ سایت و هوش مصنوعی", Icons.Rounded.CloudUpload),
+        Triple("photo_price", "قیمت با عکس برای مشتری حضوری", Icons.Rounded.PhotoCamera),
+        Triple("orders", "سفارش‌های آنلاین ووکامرس", Icons.Rounded.LocalShipping),
+        Triple("fulfillment", "چیدن، بسته‌بندی، ارسال", Icons.Rounded.Inventory2),
+        Triple("channel_stock", "ارسال موجودی به کانال‌ها", Icons.Rounded.CloudSync),
+        Triple("stocktake", "انبارگردانی با عکس", Icons.Rounded.Checklist),
+        Triple("photo_purchase", "خرید بازار با عکس", Icons.Rounded.AddAPhoto),
         Triple("inventory", "انبار و موجودی", Icons.Rounded.Warehouse),
         Triple("alerts", "هشدار و پیشنهاد موجودی", Icons.Rounded.NotificationsActive),
         Triple("history", "تاریخچه موجودی", Icons.Rounded.History),

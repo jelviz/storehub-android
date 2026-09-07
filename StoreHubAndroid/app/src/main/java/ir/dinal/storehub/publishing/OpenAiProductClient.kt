@@ -52,6 +52,39 @@ class OpenAiProductClient(
         }.filter { it in titles.indices }.distinct()
     }
 
+    fun matchLocalCatalog(imageFile: File, products: List<ir.dinal.storehub.data.ProductEntity>): List<Long> =
+        matchLocalCatalogRanked(imageFile, products).let { it.exact + it.similar }
+
+    fun matchLocalCatalogRanked(imageFile: File, products: List<ir.dinal.storehub.data.ProductEntity>): LocalCatalogRank {
+        if (products.isEmpty()) return LocalCatalogRank()
+        val listed = products.take(180)
+        val numbered = listed.mapIndexed { i, p ->
+            "$i) ${p.name} | sku=${p.sku.orEmpty()} | barcode=${p.barcode.orEmpty()} | دسته=${p.category.orEmpty()}"
+        }.joinToString("\n")
+        val prompt = """
+            عکس یک کالاست. این فهرست کاتالوگ همان فروشگاه است، نه اینترنت.
+            $numbered
+            exact: همان مدل/رنگ داخل عکس.
+            similar: کالاهای نزدیک همین فروشگاه (همان نوع، مدل دیگر، رنگ دیگر) تا فروشنده قیمت جایگزین به مشتری بدهد.
+            فقط JSON:
+            {"exact":[0],"similar":[2,5],"label":"نام کوتاه فارسی کالا"}
+        """.trimIndent()
+        val raw = visionText(imageFile, prompt)
+        val json = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        val start = json.indexOf('{')
+        val end = json.lastIndexOf('}')
+        if (start < 0 || end <= start) return LocalCatalogRank()
+        val o = JsonParser.parseString(json.substring(start, end + 1)).asJsonObject
+        fun ids(key: String) = o.getAsJsonArray(key)?.mapNotNull {
+            runCatching { it.asInt }.getOrNull() ?: runCatching { it.asString.toInt() }.getOrNull()
+        }?.filter { it in listed.indices }?.map { listed[it].id }?.distinct().orEmpty()
+        return LocalCatalogRank(
+            exact = ids("exact"),
+            similar = ids("similar").filter { it !in ids("exact").toSet() },
+            label = o.get("label")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+        )
+    }
+
     private fun visionText(imageFile: File, prompt: String): String {
         val image64 = Base64.encodeToString(imageFile.readBytes(), Base64.NO_WRAP)
         return when (provider.lowercase()) {
@@ -238,3 +271,9 @@ class OpenAiProductClient(
         }
     }
 }
+
+data class LocalCatalogRank(
+    val exact: List<Long> = emptyList(),
+    val similar: List<Long> = emptyList(),
+    val label: String = ""
+)

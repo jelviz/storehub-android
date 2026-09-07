@@ -85,6 +85,57 @@ object RefType {
     const val OPENING = "OPENING"
     const val ORDER = "ORDER"
     const val ENABLE = "ENABLE"
+    const val STOCKTAKE = "STOCKTAKE"
+}
+
+object OrderStatus {
+    const val NEW = "NEW"
+    const val RESERVED = "RESERVED"
+    const val WAITING_DEPOT = "WAITING_DEPOT"
+    const val SHORTAGE = "SHORTAGE"
+    const val PICKING = "PICKING"
+    const val PICKED = "PICKED"
+    const val PACKING = "PACKING"
+    const val PACKED = "PACKED"
+    const val SHIPPED = "SHIPPED"
+    const val CANCELLED = "CANCELLED"
+
+    fun label(status: String): String = when (status) {
+        NEW -> "جدید"
+        RESERVED -> "رزرو شده"
+        WAITING_DEPOT -> "منتظر دپو"
+        SHORTAGE -> "کمبود موجودی"
+        PICKING -> "در حال چیدن"
+        PICKED -> "چیده شد"
+        PACKING -> "در حال بسته‌بندی"
+        PACKED -> "بسته‌بندی شد"
+        SHIPPED -> "ارسال شد"
+        CANCELLED -> "لغو شد"
+        else -> status
+    }
+
+    fun isOpen(status: String) = status !in setOf(SHIPPED, CANCELLED)
+    fun canPick(status: String) = status in setOf(RESERVED, PICKING)
+    fun canPack(status: String) = status in setOf(PICKED, PACKING)
+    fun canShip(status: String) = status == PACKED
+}
+
+object StocktakeStatus {
+    const val OPEN = "OPEN"
+    const val CONFIRMED = "CONFIRMED"
+}
+
+fun wooChannelId(siteIndex: Int): Long = when (siteIndex) {
+    1 -> ChannelIds.WOO_1
+    2 -> ChannelIds.WOO_2
+    3 -> ChannelIds.WOO_3
+    else -> ChannelIds.WOO_1
+}
+
+fun wooSiteIndex(channelId: Long): Int = when (channelId) {
+    ChannelIds.WOO_2 -> 2
+    ChannelIds.WOO_3 -> 3
+    else -> 1
 }
 
 object AlertLevel {

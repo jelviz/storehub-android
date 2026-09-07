@@ -130,6 +130,15 @@ class InventoryLedgerTest {
     }
 
     @Test
+    fun reservationFulfillmentRemovesOnHandAndReserved() {
+        val reserved = InventoryLedger.reserve(row(5.0), 2.0)
+        val shipped = InventoryLedger.fulfillReservation(reserved, 2.0)
+        assertEquals(3.0, shipped.onHand, 0.0)
+        assertEquals(0.0, shipped.reserved, 0.0)
+        assertEquals(3.0, shipped.available, 0.0)
+    }
+
+    @Test
     fun transferInTransitDoesNotCountAsStoreStock() {
         val depot = InventorySnapshot(1, WarehouseIds.DEPOT, onHand = 10.0)
         val store = InventorySnapshot(1, WarehouseIds.STORE, onHand = 2.0)
@@ -191,5 +200,34 @@ class AlertEvaluatorTest {
         assertEquals(AlertLevel.OUT_OF_STOCK, plan.storeLevel)
         assertTrue(plan.notifications.any { it.type == NotificationType.OUT_OF_STOCK })
         assertEquals(0.0, InventoryMath.channelAvailable(ChannelPolicyType.TOTAL_AVAILABLE, 0.0, 0.0, 0.0), 0.0)
+    }
+}
+
+class OrderAllocatorTest {
+    @Test
+    fun storeCoversWholeOrder() {
+        val plan = OrderAllocator.plan(3.0, storeAvailable = 5.0, depotAvailable = 10.0)
+        assertEquals(3.0, plan.reserveStore, 0.0)
+        assertEquals(0.0, plan.waitDepot, 0.0)
+        assertEquals(0.0, plan.shortage, 0.0)
+        assertEquals(OrderStatus.RESERVED, OrderAllocator.status(listOf(plan)))
+    }
+
+    @Test
+    fun leftoverWaitsOnDepot() {
+        val plan = OrderAllocator.plan(5.0, storeAvailable = 2.0, depotAvailable = 8.0)
+        assertEquals(2.0, plan.reserveStore, 0.0)
+        assertEquals(3.0, plan.waitDepot, 0.0)
+        assertEquals(0.0, plan.shortage, 0.0)
+        assertEquals(OrderStatus.WAITING_DEPOT, OrderAllocator.status(listOf(plan)))
+    }
+
+    @Test
+    fun missingStockIsShortage() {
+        val plan = OrderAllocator.plan(5.0, storeAvailable = 1.0, depotAvailable = 1.0)
+        assertEquals(1.0, plan.reserveStore, 0.0)
+        assertEquals(1.0, plan.waitDepot, 0.0)
+        assertEquals(3.0, plan.shortage, 0.0)
+        assertEquals(OrderStatus.SHORTAGE, OrderAllocator.status(listOf(plan)))
     }
 }

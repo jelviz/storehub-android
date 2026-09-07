@@ -4,13 +4,24 @@ import android.content.Context
 import android.net.Uri
 import androidx.room.withTransaction
 import ir.dinal.storehub.inventory.AlertLevel
+import ir.dinal.storehub.inventory.ChannelCodes
 import ir.dinal.storehub.inventory.ChannelIds
+import ir.dinal.storehub.inventory.IntegrationMode
 import ir.dinal.storehub.inventory.InventoryMath
 import ir.dinal.storehub.inventory.InventoryService
+import ir.dinal.storehub.inventory.OrderImportResult
+import ir.dinal.storehub.inventory.OrderService
 import ir.dinal.storehub.inventory.RefType
 import ir.dinal.storehub.inventory.StockMutation
+import ir.dinal.storehub.inventory.StocktakeStatus
 import ir.dinal.storehub.inventory.TxType
 import ir.dinal.storehub.inventory.WarehouseIds
+import ir.dinal.storehub.inventory.wooChannelId
+import ir.dinal.storehub.sync.ChannelStockPusher
+import ir.dinal.storehub.sync.CommerceChannelConnector
+import ir.dinal.storehub.sync.MarketplaceConnector
+import ir.dinal.storehub.sync.StockPushResult
+import ir.dinal.storehub.sync.WooCommerceConnector
 import ir.dinal.storehub.util.MoneyFormat
 import ir.dinal.storehub.worker.NotificationHelper
 import ir.dinal.storehub.worker.ReminderScheduler
@@ -22,6 +33,9 @@ import kotlinx.coroutines.withContext
 class LocalStore private constructor(private val context:Context){
     private val db=StoreDb.get(context); private val dao=db.dao()
     private val inventory=InventoryService(dao){ id, title, text -> NotificationHelper.show(context, id, title, text) }
+    private val orders=OrderService(dao, inventory, { id, title, text -> NotificationHelper.show(context, id, title, text) }) { productId, qty, note ->
+        createTransfer(productId, qty, note)
+    }
     companion object{
         const val WAREHOUSE_STORE=WarehouseIds.STORE; const val WAREHOUSE_DEPOT=WarehouseIds.DEPOT
         @Volatile private var instance:LocalStore?=null
@@ -62,7 +76,9 @@ class LocalStore private constructor(private val context:Context){
             purchaseRequired=dao.openPurchaseSuggestionCount(),
             criticalStock=storeLevels.count{it==AlertLevel.CRITICAL}+depotLevels.count{it==AlertLevel.CRITICAL},
             unreadAlerts=dao.unreadNotificationCount(),
-            failedSync=dao.failedSyncCount()
+            failedSync=dao.failedSyncCount(),
+            openOrders=dao.openOrderCount(),
+            fulfillmentQueue=dao.fulfillmentQueueCount()
         )
     }
 
@@ -177,6 +193,7 @@ class LocalStore private constructor(private val context:Context){
             inventory.mutate(it.productId, WAREHOUSE_STORE, StockMutation(onHandDelta=it.quantity, inTransitDelta=-transit), TxType.TRANSFER_IN, RefType.TRANSFER, id, t.transferNo, "دریافت انتقال")
         }
         dao.updateTransfer(t.copy(status=3,receivedAt=System.currentTimeMillis()))
+        orders.retryOpenOrders()
     }
 
     suspend fun purchases():List<PurchaseDetails> = dao.purchases().map{PurchaseDetails(it,dao.purchaseItems(it.id), it.supplierId?.let{sid->dao.supplier(sid)})}
@@ -206,6 +223,7 @@ class LocalStore private constructor(private val context:Context){
             inventory.mutate(it.productId, p.warehouseId, StockMutation(onHandDelta=it.quantity), TxType.PURCHASE, RefType.PURCHASE, id, p.purchaseNo, "دریافت خرید", lastPurchaseCost=it.unitCost)
         }
         dao.updatePurchase(p.copy(status=2))
+        orders.retryOpenOrders()
     }
 
     suspend fun lastSupplier(productId:Long)=dao.lastSupplierForProduct(productId)
@@ -278,6 +296,152 @@ class LocalStore private constructor(private val context:Context){
             }.onFailure{failed++}}
         }
         WooSyncResult(add,update,failed,"${remote.size} کالا از ووکامرس دریافت شد. موجودی محلی تغییر نکرد.")
+    }
+
+    suspend fun mapPublishedProduct(productId:Long, siteIndex:Int, externalId:Long?, sku:String?)=
+        inventory.upsertWooMapping(productId, externalId, sku, wooChannelId(siteIndex))
+
+    suspend fun shopOrders():List<ShopOrderDetails>{
+        val names=dao.channels().associate{it.id to it.name}
+        return dao.orders().map{ ShopOrderDetails(it, dao.orderItems(it.id), names[it.channelId] ?: "کانال") }
+    }
+    suspend fun shopOrder(id:Long):ShopOrderDetails?{
+        val o=dao.order(id)?:return null
+        val name=dao.channels().firstOrNull{it.id==o.channelId}?.name ?: "کانال"
+        return ShopOrderDetails(o, dao.orderItems(id), name)
+    }
+    suspend fun importOnlineOrders():OrderImportResult=withContext(Dispatchers.IO){
+        val drafts=commerceConnectors().values.flatMap{ runCatching{ it.getOrders() }.getOrDefault(emptyList()) }
+        db.withTransaction{ orders.ingest(drafts) }
+    }
+    suspend fun retryOrderStock()=db.withTransaction{ orders.retryOpenOrders() }
+    suspend fun startPicking(id:Long)=db.withTransaction{ orders.startPicking(id) }
+    suspend fun confirmPicked(id:Long)=db.withTransaction{ orders.confirmPicked(id) }
+    suspend fun startPacking(id:Long)=db.withTransaction{ orders.startPacking(id) }
+    suspend fun confirmPacked(id:Long)=db.withTransaction{ orders.confirmPacked(id) }
+    suspend fun shipOrder(id:Long){
+        val order=db.withTransaction{
+            val current=dao.order(id)?:error("سفارش پیدا نشد.")
+            orders.ship(id)
+            current
+        }
+        runCatching { commerceConnectors()[order.channelId]?.updateOrderStatus(order.externalOrderId, "completed") }
+    }
+    suspend fun cancelOrder(id:Long, note:String?){
+        val order=db.withTransaction{
+            val current=dao.order(id)?:error("سفارش پیدا نشد.")
+            orders.cancel(id, note)
+            current
+        }
+        runCatching { commerceConnectors()[order.channelId]?.updateOrderStatus(order.externalOrderId, "cancelled") }
+    }
+
+    suspend fun startStocktake(warehouseId:Int, note:String?):Long=
+        dao.insertStocktake(StocktakeSessionEntity(sessionNo="ST-${System.currentTimeMillis()}", warehouseId=warehouseId, note=note))
+    suspend fun stocktakes():List<StocktakeDetails> = dao.stocktakes().map{ StocktakeDetails(it, dao.stocktakeItems(it.id)) }
+    suspend fun addStocktakeCount(sessionId:Long, productId:Long, counted:Double, hint:String?):Long=db.withTransaction{
+        val session=dao.stocktake(sessionId)?:error("انبارگردانی پیدا نشد.")
+        require(session.status==StocktakeStatus.OPEN){"این شمارش قبلاً تأیید شده است."}
+        val product=dao.product(productId)?:error("کالا پیدا نشد.")
+        inventory.ensureInventory(productId, session.warehouseId)
+        val system=inventory.snapshot(productId, session.warehouseId).onHand
+        val existing=dao.stocktakeItem(sessionId, productId)
+        if(existing!=null){
+            dao.updateStocktakeItem(existing.copy(countedQty=counted, systemQty=system, hint=hint?:existing.hint))
+            existing.id
+        }else dao.insertStocktakeItem(StocktakeItemEntity(sessionId=sessionId, productId=productId, name=product.name, systemQty=system, countedQty=counted, hint=hint))
+    }
+    suspend fun confirmStocktake(sessionId:Long)=db.withTransaction{
+        val session=dao.stocktake(sessionId)?:error("انبارگردانی پیدا نشد.")
+        require(session.status==StocktakeStatus.OPEN){"این شمارش قبلاً تأیید شده است."}
+        val items=dao.stocktakeItems(sessionId)
+        require(items.isNotEmpty()){"حداقل یک کالا بشمار."}
+        items.forEach{
+            val delta=it.countedQty-it.systemQty
+            if(kotlin.math.abs(delta)>0.000001){
+                inventory.mutate(
+                    it.productId, session.warehouseId, StockMutation(onHandDelta=delta),
+                    TxType.STOCKTAKING_DIFFERENCE, RefType.STOCKTAKE, sessionId, session.sessionNo,
+                    "انبارگردانی ${session.sessionNo}"+(it.hint?.let{h->" • $h"}?:"" )
+                )
+            }
+        }
+        dao.updateStocktake(session.copy(status=StocktakeStatus.CONFIRMED, confirmedAt=System.currentTimeMillis()))
+        orders.retryOpenOrders()
+    }
+
+    suspend fun channelStockRows():List<ChannelStockRow>{
+        val names=dao.products().associate{it.id to it.name}
+        val channels=dao.channels().associateBy{it.id}
+        return dao.allSyncQueue().map{
+            ChannelStockRow(it, names[it.productId]?:"کالا", channels[it.channelId]?.name?:"کانال", channels[it.channelId]?.integrationMode?:IntegrationMode.DISABLED)
+        }
+    }
+    suspend fun enqueueAllChannelStock(){
+        dao.products().forEach{ inventory.enqueueChannelStock(it.id) }
+    }
+    suspend fun pushChannelStock():StockPushResult=withContext(Dispatchers.IO){
+        enqueueAllChannelStock()
+        val pusher=ChannelStockPusher(dao, commerceConnectors())
+        val result=pusher.flush()
+        MarketplacePrefs(context).endpoints().forEach{ ep ->
+            dao.setChannelMode(ep.channelId, if(ep.configured) IntegrationMode.API else IntegrationMode.MANUAL)
+        }
+        result
+    }
+    suspend fun markChannelStockManual(id:Long)=ChannelStockPusher(dao, emptyMap()).markManualSent(id)
+    suspend fun saveMarketplace(endpoint:MarketplaceEndpoint){
+        MarketplacePrefs(context).save(endpoint)
+        dao.setChannelMode(endpoint.channelId, if(endpoint.configured) IntegrationMode.API else IntegrationMode.MANUAL)
+    }
+    fun marketplaceEndpoints()=MarketplacePrefs(context).endpoints()
+
+    private fun commerceConnectors():Map<Long, CommerceChannelConnector>{
+        val map=HashMap<Long, CommerceChannelConnector>()
+        PublishingPrefs(context).sites().forEach{ site ->
+            if(site.baseUrl.startsWith("https://") && site.consumerKey.startsWith("ck_") && site.consumerSecret.startsWith("cs_")){
+                val code=when(site.index){ 2->ChannelCodes.WOO_2; 3->ChannelCodes.WOO_3; else->ChannelCodes.WOO_1 }
+                map[wooChannelId(site.index)] = WooCommerceConnector(site.toWooSettings(), code)
+            }
+        }
+        val woo=WooPrefs(context).settings()
+        if(!map.containsKey(ChannelIds.WOO_1) && woo.baseUrl.startsWith("https://") && woo.consumerKey.startsWith("ck_")){
+            map[ChannelIds.WOO_1] = WooCommerceConnector(woo, ChannelCodes.WOO_1)
+        }
+        MarketplacePrefs(context).endpoints().filter{ it.configured }.forEach{ ep ->
+            val code=if(ep.channelId==ChannelIds.TAPSI) ChannelCodes.TAPSI else ChannelCodes.SNAPP
+            map[ep.channelId] = MarketplaceConnector(ep.baseUrl, ep.token, code)
+        }
+        return map
+    }
+
+    suspend fun photoPriceLookup(uri: android.net.Uri): PhotoPriceLookup {
+        val products = dao.products()
+        val prefs = PublishingPrefs(context)
+        val ranked = ir.dinal.storehub.publishing.LocalPhotoMatcher.matchRanked(context, uri, products)
+        val storeQty = HashMap<Long, Double>()
+        val depotQty = HashMap<Long, Double>()
+        products.forEach { p ->
+            val s = dao.inventoryOne(p.id, WAREHOUSE_STORE)
+            val d = dao.inventoryOne(p.id, WAREHOUSE_DEPOT)
+            storeQty[p.id] = InventoryMath.available(s?.quantity ?: 0.0, s?.reserved ?: 0.0, s?.damaged ?: 0.0)
+            depotQty[p.id] = InventoryMath.available(d?.quantity ?: 0.0, d?.reserved ?: 0.0, d?.damaged ?: 0.0)
+        }
+        val hits = ranked.map {
+            PhotoPriceHit(
+                product = it.product,
+                storeAvailable = storeQty[it.product.id] ?: 0.0,
+                depotAvailable = depotQty[it.product.id] ?: 0.0,
+                kind = it.kind,
+                note = it.note
+            )
+        }
+        val message = when {
+            hits.isNotEmpty() -> null
+            !prefs.hasOpenAiKey() -> "بارکد روی عکس خوانده نشد. برای پیدا کردن از روی ظاهر کالا، کلید هوش مصنوعی را در تنظیمات ۳ سایت بگذار."
+            else -> "این کالا در کاتالوگ همین فروشگاه پیدا نشد. اول باید کالا را در StoreHub ثبت کرده باشی."
+        }
+        return PhotoPriceLookup(hits = hits, usedAi = prefs.hasOpenAiKey(), message = message)
     }
 
     /**

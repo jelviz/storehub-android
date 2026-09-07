@@ -36,6 +36,7 @@ fun PosScreen(activity: Activity, nav: NavHostController) {
 
     val posEntry = remember(nav) { nav.getBackStackEntry("pos") }
     val scanResult by posEntry.savedStateHandle.getStateFlow("scan_result", "").collectAsState()
+    val photoProductId by posEntry.savedStateHandle.getStateFlow("photo_product_id", 0L).collectAsState()
 
     fun addProduct(p: ProductEntity) {
         val i = cart.indexOfFirst { it.product.id == p.id }
@@ -56,6 +57,13 @@ fun PosScreen(activity: Activity, nav: NavHostController) {
         }
     }
 
+    LaunchedEffect(photoProductId) {
+        if (photoProductId > 0L) {
+            val found = store.products().firstOrNull { it.id == photoProductId }
+            if (found != null) addProduct(found)
+            posEntry.savedStateHandle["photo_product_id"] = 0L
+        }
+    }
     LaunchedEffect(scanResult) {
         if (scanResult.isNotBlank()) {
             lookup(scanResult)
@@ -71,7 +79,7 @@ fun PosScreen(activity: Activity, nav: NavHostController) {
             Modifier.padding(pad).fillMaxSize().imePadding().padding(horizontal = 14.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            DinalHero("فروش سریع", "جستجو، اسکن یا کد کالا؛ موجودی فقط از فروشگاه کم می‌شود") {
+            DinalHero("فروش سریع", "جستجو، اسکن، عکس یا کد کالا؛ موجودی فقط از فروشگاه کم می‌شود") {
                 Icon(Icons.Rounded.PointOfSale, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(42.dp))
             }
 
@@ -88,6 +96,9 @@ fun PosScreen(activity: Activity, nav: NavHostController) {
                 Button(onClick = { nav.navigate("scanner") }, contentPadding = PaddingValues(horizontal = 14.dp, vertical = 14.dp)) {
                     Icon(Icons.Rounded.QrCodeScanner, null); Spacer(Modifier.width(5.dp)); Text("اسکن")
                 }
+            }
+            OutlinedButton(onClick = { nav.navigate("photo_price") }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Rounded.PhotoCamera, null); Spacer(Modifier.width(6.dp)); Text("قیمت با عکس — برای مشتری حضوری")
             }
 
             OutlinedTextField(

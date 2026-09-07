@@ -32,7 +32,7 @@ fun SyncScreen(nav: NavHostController) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var page by remember { mutableIntStateOf(0) }
-    var message by remember { mutableStateOf("سینک فقط کاتالوگ، قیمت، SKU، دسته‌بندی و تصویر را دریافت می‌کند؛ موجودی محلی دست نمی‌خورد.") }
+    var message by remember { mutableStateOf("سینک کاتالوگ موجودی محلی را عوض نمی‌کند. سفارش‌ها را از صفحه «سفارش‌های آنلاین» بگیر.") }
 
     DinalScreen(nav, "سینک WooCommerce") { pad ->
         LazyColumn(
@@ -154,7 +154,7 @@ fun SettingsScreen(activity: Activity, nav: NavHostController) {
                                 prefs.baseUrl = s.baseUrl; prefs.apiVersion = s.apiVersion; prefs.autoSync = s.autoSync; prefs.autoSyncMinutes = s.autoSyncMinutes; prefs.queryStringAuth = s.queryStringAuth
                                 if (key.isNotBlank()) prefs.setConsumerKey(key)
                                 if (secret.isNotBlank()) prefs.setConsumerSecret(secret)
-                                key = ""; secret = ""; WorkerScheduler.scheduleWoo(ctx); message = "تنظیمات WooCommerce ذخیره شد."
+                                key = ""; secret = ""; WorkerScheduler.scheduleAll(ctx); message = "تنظیمات WooCommerce ذخیره شد."
                             }, modifier = Modifier.weight(1f)
                         ) { Icon(Icons.Rounded.Save, null); Spacer(Modifier.width(5.dp)); Text("ذخیره") }
                         OutlinedButton(
@@ -198,7 +198,7 @@ fun SettingsScreen(activity: Activity, nav: NavHostController) {
 
             item {
                 SectionCard("پشتیبان‌گیری محلی") {
-                    Text("کالاها، موجودی، فروش، خرید، چک و قرارها داخل فایل JSON ذخیره می‌شوند. کلید WooCommerce عمداً در بکاپ نیست.", style = MaterialTheme.typography.bodySmall)
+                    Text("کالاها، موجودی، فروش، خرید، سفارش، انبارگردانی، چک و قرارها داخل فایل JSON ذخیره می‌شوند. کلید WooCommerce عمداً در بکاپ نیست.", style = MaterialTheme.typography.bodySmall)
                     Button(onClick = { exportLauncher.launch("dinal-storehub-${todayPersian().replace('/', '-')}.json") }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Backup, null); Spacer(Modifier.width(6.dp)); Text("گرفتن بکاپ") }
                     OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/plain")) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Restore, null); Spacer(Modifier.width(6.dp)); Text("بازیابی بکاپ") }
                 }
@@ -210,7 +210,7 @@ fun SettingsScreen(activity: Activity, nav: NavHostController) {
                 Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f))) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("DINAL StoreHub", fontWeight = FontWeight.Bold)
-                        Text("نسخه 16.4.0 • Android Only", style = MaterialTheme.typography.bodySmall)
+                        Text("نسخه 16.5.0 • Android Only", style = MaterialTheme.typography.bodySmall)
                         Text("نویسنده: Mohammad Jelviz", style = MaterialTheme.typography.bodySmall)
                         Text("بدون بک‌اند، بدون VPS؛ اطلاعات اصلی روی همین گوشی ذخیره می‌شود.", style = MaterialTheme.typography.bodySmall)
                     }

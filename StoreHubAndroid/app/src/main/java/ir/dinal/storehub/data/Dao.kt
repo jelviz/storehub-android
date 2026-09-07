@@ -157,8 +157,44 @@ interface StoreHubDao {
     @Query("SELECT * FROM StockSyncQueueEntity WHERE productId=:productId AND channelId=:channelId LIMIT 1") suspend fun syncQueueItem(productId:Long, channelId:Long):StockSyncQueueEntity?
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun upsertSyncQueue(item:StockSyncQueueEntity):Long
     @Query("SELECT * FROM StockSyncQueueEntity WHERE status=:status ORDER BY createdAt DESC") suspend fun syncQueueByStatus(status:String):List<StockSyncQueueEntity>
+    @Query("SELECT * FROM StockSyncQueueEntity ORDER BY createdAt DESC") suspend fun allSyncQueue():List<StockSyncQueueEntity>
     @Query("SELECT COUNT(*) FROM StockSyncQueueEntity WHERE status='FAILED'") suspend fun failedSyncCount():Int
+    @Query("UPDATE StockSyncQueueEntity SET status=:status, retryCount=:retryCount, lastAttemptAt=:attemptedAt, lastError=:error WHERE id=:id")
+    suspend fun updateSyncQueue(id:Long, status:String, retryCount:Int, attemptedAt:Long, error:String?)
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun restoreSyncQueue(items:List<StockSyncQueueEntity>)
+
+    @Query("UPDATE ChannelEntity SET integrationMode=:mode WHERE id=:id") suspend fun setChannelMode(id:Long, mode:String)
+    @Query("SELECT * FROM ProductChannelMappingEntity WHERE productId=:productId AND channelId=:channelId LIMIT 1") suspend fun mapping(productId:Long, channelId:Long):ProductChannelMappingEntity?
+    @Query("SELECT * FROM ProductChannelMappingEntity WHERE channelId=:channelId AND externalProductId=:externalId LIMIT 1") suspend fun mappingByExternal(channelId:Long, externalId:String):ProductChannelMappingEntity?
+    @Query("SELECT * FROM ProductChannelMappingEntity WHERE channelId=:channelId AND externalSku=:sku LIMIT 1") suspend fun mappingBySku(channelId:Long, sku:String):ProductChannelMappingEntity?
+
+    @Insert suspend fun insertOrder(o:ShopOrderEntity):Long
+    @Update suspend fun updateOrder(o:ShopOrderEntity)
+    @Query("SELECT * FROM ShopOrderEntity ORDER BY createdAt DESC") suspend fun orders():List<ShopOrderEntity>
+    @Query("SELECT * FROM ShopOrderEntity") suspend fun allOrders():List<ShopOrderEntity>
+    @Query("SELECT * FROM ShopOrderEntity WHERE id=:id") suspend fun order(id:Long):ShopOrderEntity?
+    @Query("SELECT * FROM ShopOrderEntity WHERE channelId=:channelId AND externalOrderId=:externalId LIMIT 1") suspend fun orderByExternal(channelId:Long, externalId:String):ShopOrderEntity?
+    @Query("SELECT COUNT(*) FROM ShopOrderEntity WHERE status NOT IN ('SHIPPED','CANCELLED')") suspend fun openOrderCount():Int
+    @Query("SELECT COUNT(*) FROM ShopOrderEntity WHERE status IN ('RESERVED','PICKING','PICKED','PACKING','PACKED')") suspend fun fulfillmentQueueCount():Int
+    @Insert suspend fun insertOrderItems(items:List<ShopOrderItemEntity>)
+    @Update suspend fun updateOrderItem(item:ShopOrderItemEntity)
+    @Query("SELECT * FROM ShopOrderItemEntity WHERE orderId=:orderId ORDER BY id") suspend fun orderItems(orderId:Long):List<ShopOrderItemEntity>
+    @Query("SELECT * FROM ShopOrderItemEntity") suspend fun allOrderItems():List<ShopOrderItemEntity>
+    @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun restoreOrders(items:List<ShopOrderEntity>)
+    @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun restoreOrderItems(items:List<ShopOrderItemEntity>)
+
+    @Insert suspend fun insertStocktake(s:StocktakeSessionEntity):Long
+    @Update suspend fun updateStocktake(s:StocktakeSessionEntity)
+    @Query("SELECT * FROM StocktakeSessionEntity ORDER BY createdAt DESC") suspend fun stocktakes():List<StocktakeSessionEntity>
+    @Query("SELECT * FROM StocktakeSessionEntity") suspend fun allStocktakes():List<StocktakeSessionEntity>
+    @Query("SELECT * FROM StocktakeSessionEntity WHERE id=:id") suspend fun stocktake(id:Long):StocktakeSessionEntity?
+    @Insert suspend fun insertStocktakeItem(item:StocktakeItemEntity):Long
+    @Query("SELECT * FROM StocktakeItemEntity WHERE sessionId=:sessionId ORDER BY id") suspend fun stocktakeItems(sessionId:Long):List<StocktakeItemEntity>
+    @Query("SELECT * FROM StocktakeItemEntity") suspend fun allStocktakeItems():List<StocktakeItemEntity>
+    @Query("SELECT * FROM StocktakeItemEntity WHERE sessionId=:sessionId AND productId=:productId LIMIT 1") suspend fun stocktakeItem(sessionId:Long, productId:Long):StocktakeItemEntity?
+    @Update suspend fun updateStocktakeItem(item:StocktakeItemEntity)
+    @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun restoreStocktakes(items:List<StocktakeSessionEntity>)
+    @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun restoreStocktakeItems(items:List<StocktakeItemEntity>)
 
     @Query("DELETE FROM ProductEntity") suspend fun clearProducts()
     @Query("DELETE FROM InventoryEntity") suspend fun clearInventory()
@@ -178,4 +214,8 @@ interface StoreHubDao {
     @Query("DELETE FROM PurchaseSuggestionEntity") suspend fun clearPurchaseSuggestions()
     @Query("DELETE FROM AuditLogEntity") suspend fun clearAudits()
     @Query("DELETE FROM StockSyncQueueEntity") suspend fun clearSyncQueue()
+    @Query("DELETE FROM ShopOrderItemEntity") suspend fun clearOrderItems()
+    @Query("DELETE FROM ShopOrderEntity") suspend fun clearOrders()
+    @Query("DELETE FROM StocktakeItemEntity") suspend fun clearStocktakeItems()
+    @Query("DELETE FROM StocktakeSessionEntity") suspend fun clearStocktakes()
 }

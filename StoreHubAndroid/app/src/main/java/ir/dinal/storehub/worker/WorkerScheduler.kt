@@ -11,6 +11,8 @@ object WorkerScheduler {
         scheduleReminders(context)
         scheduleReminderRescan(context)
         scheduleWoo(context)
+        scheduleOrders(context)
+        scheduleStockPush(context)
     }
 
     fun scheduleReminders(context: Context) {
@@ -43,5 +45,33 @@ object WorkerScheduler {
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
         wm.enqueueUniquePeriodicWork("storehub_woo_sync", ExistingPeriodicWorkPolicy.UPDATE, req)
+    }
+
+    fun scheduleOrders(context: Context) {
+        val wm = WorkManager.getInstance(context)
+        val p = WooPrefs(context)
+        if (!p.autoSync) {
+            wm.cancelUniqueWork("storehub_order_sync")
+            return
+        }
+        val min = p.autoSyncMinutes.coerceAtLeast(15).toLong()
+        val req = PeriodicWorkRequestBuilder<OrderSyncWorker>(min, TimeUnit.MINUTES)
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .build()
+        wm.enqueueUniquePeriodicWork("storehub_order_sync", ExistingPeriodicWorkPolicy.UPDATE, req)
+    }
+
+    fun scheduleStockPush(context: Context) {
+        val wm = WorkManager.getInstance(context)
+        val p = WooPrefs(context)
+        if (!p.autoSync) {
+            wm.cancelUniqueWork("storehub_stock_push")
+            return
+        }
+        val min = p.autoSyncMinutes.coerceAtLeast(15).toLong()
+        val req = PeriodicWorkRequestBuilder<StockPushWorker>(min, TimeUnit.MINUTES)
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .build()
+        wm.enqueueUniquePeriodicWork("storehub_stock_push", ExistingPeriodicWorkPolicy.UPDATE, req)
     }
 }

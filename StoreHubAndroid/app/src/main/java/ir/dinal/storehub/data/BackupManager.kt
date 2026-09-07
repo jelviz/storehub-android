@@ -17,7 +17,7 @@ class BackupManager(private val context:Context){
     suspend fun exportTo(uri:Uri)=withContext(Dispatchers.IO){
         val woo=WooPrefs(context)
         val payload=BackupPayload(
-            version=2,
+            version=3,
             products=dao.products(),
             inventory=dao.allInventory(),
             movements=dao.allMovements(),
@@ -40,18 +40,23 @@ class BackupManager(private val context:Context){
             transferSuggestions=dao.openTransferSuggestions(),
             purchaseSuggestions=dao.openPurchaseSuggestions(),
             audits=dao.audits(500),
-            syncQueue=dao.syncQueueByStatus("PENDING")+dao.syncQueueByStatus("FAILED")
+            syncQueue=dao.syncQueueByStatus("PENDING")+dao.syncQueueByStatus("FAILED")+dao.syncQueueByStatus("SUCCESS").take(80),
+            orders=dao.allOrders(),
+            orderItems=dao.allOrderItems(),
+            stocktakes=dao.allStocktakes(),
+            stocktakeItems=dao.allStocktakeItems()
         )
         context.contentResolver.openOutputStream(uri,"wt")!!.use{out->OutputStreamWriter(out,Charsets.UTF_8).use{it.write(gson.toJson(payload))}}
     }
 
     suspend fun importFrom(uri:Uri)=withContext(Dispatchers.IO){
         val payload=context.contentResolver.openInputStream(uri)!!.use{input->InputStreamReader(input,Charsets.UTF_8).use{gson.fromJson(it,BackupPayload::class.java)}}
-        require(payload.version in 1..2){"نسخه فایل پشتیبان پشتیبانی نمی‌شود."}
+        require(payload.version in 1..3){"نسخه فایل پشتیبان پشتیبانی نمی‌شود."}
         val products=if(payload.version==1) payload.products.map{it.copy(isActive=true, createdAt=if(it.createdAt==0L) it.updatedAt else it.createdAt)} else payload.products
         db.withTransaction{
             dao.clearSaleItems();dao.clearSales();dao.clearTransferItems();dao.clearTransfers();dao.clearPurchaseItems();dao.clearPurchases();dao.clearMovements();dao.clearInventory();dao.clearChecks();dao.clearAppointments();dao.clearProducts()
             dao.clearSuppliers();dao.clearMappings();dao.clearNotifications();dao.clearTransferSuggestions();dao.clearPurchaseSuggestions();dao.clearAudits();dao.clearSyncQueue()
+            dao.clearOrderItems();dao.clearOrders();dao.clearStocktakeItems();dao.clearStocktakes()
             if(products.isNotEmpty())dao.insertProducts(products)
             if(payload.inventory.isNotEmpty())dao.insertInventory(payload.inventory)
             if(payload.movements.isNotEmpty())dao.insertMovements(payload.movements)
@@ -70,6 +75,10 @@ class BackupManager(private val context:Context){
             payload.purchaseSuggestions.orEmpty().takeIf{it.isNotEmpty()}?.let{dao.restorePurchaseSuggestions(it)}
             payload.audits.orEmpty().takeIf{it.isNotEmpty()}?.let{dao.restoreAudits(it)}
             payload.syncQueue.orEmpty().takeIf{it.isNotEmpty()}?.let{dao.restoreSyncQueue(it)}
+            payload.orders.orEmpty().takeIf{it.isNotEmpty()}?.let{dao.restoreOrders(it)}
+            payload.orderItems.orEmpty().takeIf{it.isNotEmpty()}?.let{dao.restoreOrderItems(it)}
+            payload.stocktakes.orEmpty().takeIf{it.isNotEmpty()}?.let{dao.restoreStocktakes(it)}
+            payload.stocktakeItems.orEmpty().takeIf{it.isNotEmpty()}?.let{dao.restoreStocktakeItems(it)}
         }
         WooPrefs(context).apply{baseUrl=payload.wooBaseUrl;apiVersion=payload.wooApiVersion;autoSync=payload.wooAutoSync;autoSyncMinutes=payload.wooAutoSyncMinutes;queryStringAuth=payload.wooQueryStringAuth;clearCredentials()}
         payload.checks.filter { it.status == 1 }.forEach { ReminderScheduler.scheduleCheck(context, it) }

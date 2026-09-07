@@ -165,3 +165,62 @@ class PublishingPrefs(private val context:Context){
         }.getOrDefault("")
     }
 }
+
+data class MarketplaceEndpoint(
+    val channelId:Long,
+    val name:String,
+    val baseUrl:String="",
+    val token:String=""
+) {
+    val configured:Boolean get() = baseUrl.startsWith("https://")
+}
+
+class MarketplacePrefs(context:Context){
+    private val prefs=context.getSharedPreferences("storehub_marketplace",Context.MODE_PRIVATE)
+    private val alias="storehub_marketplace_secure_key"
+
+    fun snapp()=endpoint(ir.dinal.storehub.inventory.ChannelIds.SNAPP, "اسنپ‌شاپ", "snapp_")
+    fun tapsi()=endpoint(ir.dinal.storehub.inventory.ChannelIds.TAPSI, "تپسی‌شاپ", "tapsi_")
+
+    fun endpoints()=listOf(snapp(), tapsi())
+
+    fun save(endpoint:MarketplaceEndpoint){
+        val p=prefix(endpoint.channelId)
+        prefs.edit().putString(p+"url", endpoint.baseUrl.trim().trimEnd('/')).apply()
+        if(endpoint.token.isNotBlank()) prefs.edit().putString(p+"token", encrypt(endpoint.token.trim())).apply()
+    }
+
+    private fun prefix(channelId:Long)=if(channelId==ir.dinal.storehub.inventory.ChannelIds.TAPSI) "tapsi_" else "snapp_"
+
+    private fun endpoint(channelId:Long, name:String, p:String)=MarketplaceEndpoint(
+        channelId=channelId,
+        name=name,
+        baseUrl=prefs.getString(p+"url","").orEmpty(),
+        token=decrypt(prefs.getString(p+"token",null))
+    )
+
+    private fun secretKey():SecretKey{
+        val ks=KeyStore.getInstance("AndroidKeyStore").apply{load(null)}
+        (ks.getKey(alias,null) as? SecretKey)?.let{return it}
+        val kg=KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES,"AndroidKeyStore")
+        kg.init(KeyGenParameterSpec.Builder(alias,KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setKeySize(256).build())
+        return kg.generateKey()
+    }
+    private fun encrypt(value:String):String{
+        val c=Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(Cipher.ENCRYPT_MODE,secretKey())
+        return Base64.encodeToString(c.iv,Base64.NO_WRAP)+":"+Base64.encodeToString(c.doFinal(value.toByteArray(Charsets.UTF_8)),Base64.NO_WRAP)
+    }
+    private fun decrypt(stored:String?):String{
+        if(stored.isNullOrBlank()) return ""
+        return runCatching{
+            val p=stored.split(':',limit=2)
+            val c=Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(Cipher.DECRYPT_MODE,secretKey(),GCMParameterSpec(128,Base64.decode(p[0],Base64.NO_WRAP)))
+            String(c.doFinal(Base64.decode(p[1],Base64.NO_WRAP)),Charsets.UTF_8)
+        }.getOrDefault("")
+    }
+}

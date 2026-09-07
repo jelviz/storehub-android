@@ -193,6 +193,7 @@ fun SmartProductScreen(nav: NavHostController) {
     var error by remember { mutableStateOf<String?>(null) }
     var publishResults by remember { mutableStateOf<List<WooPublishResult>>(emptyList()) }
     var localSaved by rememberSaveable { mutableStateOf(false) }
+    var localProductId by rememberSaveable { mutableStateOf(0L) }
     var catalogMatches by remember { mutableStateOf<List<CatalogMatch>>(emptyList()) }
     var catalogDetail by remember { mutableStateOf<CatalogProductDetail?>(null) }
     var catalogImageUrl by remember { mutableStateOf<String?>(null) }
@@ -473,7 +474,7 @@ fun SmartProductScreen(nav: NavHostController) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                DinalHero("از عکس تا ۳ فروشگاه", "نسخه ۱۶.۴.۰ — موجودی مرجع StoreHub است؛ تأیید کالا همه عکس‌های صفحه را به ووکامرس می‌فرستد") {
+                DinalHero("از عکس تا ۳ فروشگاه", "نسخه ۱۶.۵.۰ — موجودی مرجع StoreHub است؛ سفارش آنلاین رزرو می‌شود و موجودی به کانال‌ها push می‌شود") {
                     Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(42.dp))
                 }
             }
@@ -691,7 +692,7 @@ fun SmartProductScreen(nav: NavHostController) {
                                         val regularText = if (samePrice) globalRegular else regularBySite[primarySite.index].orEmpty()
                                         val saleText = if (samePrice) globalSale else saleBySite[primarySite.index].orEmpty()
                                         val reg = parseToman(regularText); val sale = parseToman(saleText)
-                                        store.saveProduct(
+                                        localProductId = store.saveProduct(
                                             ProductEntity(
                                                 name = name.trim(), sku = sku.trim().ifBlank { null },
                                                 price = if (sale > 0) sale else reg,
@@ -702,6 +703,11 @@ fun SmartProductScreen(nav: NavHostController) {
                                             opening.toDoubleOrNull() ?: 0.0
                                         )
                                         localSaved = true
+                                    }
+                                    if (localProductId > 0) {
+                                        results.filter { it.success }.forEach { r ->
+                                            store.mapPublishedProduct(localProductId, r.siteIndex, r.productId, sku.trim().ifBlank { null })
+                                        }
                                     }
                                     val ok = results.count { it.success }
                                     val fail = results.size - ok

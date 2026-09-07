@@ -1,4 +1,4 @@
-name: Build DINAL StoreHub V16.4.0 APK
+name: Build DINAL StoreHub V16.5.0 APK
 
 on:
   workflow_dispatch:
@@ -16,11 +16,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Verify V16.2 source
+      - name: Verify V16.5 source
         run: |
           test -f StoreHubAndroid/app/build.gradle.kts
-          grep -q 'versionName = "16.4.0"' StoreHubAndroid/app/build.gradle.kts
-          grep -q 'versionCode = 25' StoreHubAndroid/app/build.gradle.kts
+          grep -q 'versionName = "16.5.0"' StoreHubAndroid/app/build.gradle.kts
+          grep -q 'versionCode = 26' StoreHubAndroid/app/build.gradle.kts
           grep -q 'DinalAssistantScreen' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/ui/DinalAssistant.kt
           grep -q 'tokens.count' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/data/LocalStore.kt
           grep -q 'removeWhiteBackground' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/publishing/ProductImageProcessor.kt
@@ -30,6 +30,13 @@ jobs:
           grep -q 'downloadImages' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/publishing/IranianCatalogClient.kt
           grep -q 'InventoryLedger' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/inventory/InventoryLedger.kt
           grep -q 'WarehouseEntity' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/data/Entities.kt
+          grep -q 'OrderAllocator' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/inventory/OrderAllocator.kt
+          grep -q 'fetchOrders' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/data/WooClient.kt
+          grep -q 'fulfillReservation' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/inventory/InventoryLedger.kt
+          grep -q 'ShopOrderEntity' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/data/Entities.kt
+          grep -q 'PhotoStocktakeScreen' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/ui/PhotoOps.kt
+          grep -q 'PhotoPriceLookupScreen' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/ui/PhotoPriceLookup.kt
+          grep -q 'ChannelStockPusher' StoreHubAndroid/app/src/main/java/ir/dinal/storehub/sync/ChannelStockPusher.kt
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -88,11 +95,11 @@ jobs:
           "$APKSIGNER" verify --verbose StoreHubAndroid/app/build/outputs/apk/release/app-release.apk
 
       - name: Prepare APK
-        run: cp StoreHubAndroid/app/build/outputs/apk/release/app-release.apk DINAL-StoreHub-V16.4.0.apk
+        run: cp StoreHubAndroid/app/build/outputs/apk/release/app-release.apk DINAL-StoreHub-V16.5.0.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: DINAL-StoreHub-V16.4.0-APK
-          path: DINAL-StoreHub-V16.4.0.apk
+          name: DINAL-StoreHub-V16.5.0-APK
+          path: DINAL-StoreHub-V16.5.0.apk
           if-no-files-found: error

@@ -63,12 +63,17 @@ class InventoryService(
             expectedVersion = current.version
         )
         require(updated == 1) { "موجودی همزمان تغییر کرد. دوباره تلاش کن." }
+        val shownDelta = when {
+            kotlin.math.abs(mutation.onHandDelta) > 0.000001 -> mutation.onHandDelta
+            kotlin.math.abs(mutation.reservedDelta) > 0.000001 -> mutation.reservedDelta
+            else -> mutation.inTransitDelta + mutation.damagedDelta
+        }
         dao.movement(
             InventoryMovementEntity(
                 productId = productId,
                 warehouseId = warehouseId,
                 type = type,
-                quantityDelta = mutation.onHandDelta,
+                quantityDelta = shownDelta,
                 balanceAfter = next.onHand,
                 reference = reference,
                 note = note,
@@ -204,7 +209,7 @@ class InventoryService(
         val store = dao.inventoryOne(productId, WarehouseIds.STORE)?.toSnapshot()?.available ?: 0.0
         val depot = dao.inventoryOne(productId, WarehouseIds.DEPOT)?.toSnapshot()?.available ?: 0.0
         val policies = dao.channelPolicies().associateBy { it.channelId }
-        dao.channels().filter { it.isActive }.forEach { channel ->
+        dao.channels().filter { it.isActive && it.integrationMode != IntegrationMode.DISABLED }.forEach { channel ->
             val policy = policies[channel.id] ?: return@forEach
             val qty = InventoryMath.channelAvailable(policy.policyType, store, depot, policy.safetyStock)
             val existing = dao.syncQueueItem(productId, channel.id)
@@ -218,15 +223,40 @@ class InventoryService(
         }
     }
 
-    suspend fun upsertWooMapping(productId: Long, wooId: Long?, sku: String?) {
+    suspend fun upsertWooMapping(productId: Long, wooId: Long?, sku: String?, channelId: Long = ChannelIds.WOO_1) {
         if (wooId == null) return
         dao.upsertMapping(
             ProductChannelMappingEntity(
                 productId = productId,
-                channelId = ChannelIds.WOO_1,
+                channelId = channelId,
                 externalProductId = wooId.toString(),
                 externalSku = sku
             )
+        )
+    }
+
+    suspend fun reserve(productId: Long, warehouseId: Int, quantity: Double, orderId: Long, orderNo: String) {
+        InventoryLedger.reserve(snapshot(productId, warehouseId), quantity)
+        mutate(
+            productId, warehouseId, StockMutation(reservedDelta = quantity),
+            TxType.RESERVATION, RefType.ORDER, orderId, orderNo, "رزرو سفارش $orderNo"
+        )
+    }
+
+    suspend fun releaseReservation(productId: Long, warehouseId: Int, quantity: Double, orderId: Long, orderNo: String, type: Int = TxType.RESERVATION_RELEASE) {
+        if (quantity <= 0.000001) return
+        InventoryLedger.releaseReservation(snapshot(productId, warehouseId), quantity)
+        mutate(
+            productId, warehouseId, StockMutation(reservedDelta = -quantity),
+            type, RefType.ORDER, orderId, orderNo, "آزادسازی رزرو $orderNo"
+        )
+    }
+
+    suspend fun fulfillReservation(productId: Long, warehouseId: Int, quantity: Double, orderId: Long, orderNo: String) {
+        InventoryLedger.fulfillReservation(snapshot(productId, warehouseId), quantity)
+        mutate(
+            productId, warehouseId, StockMutation(onHandDelta = -quantity, reservedDelta = -quantity),
+            TxType.SALE, RefType.ORDER, orderId, orderNo, "ارسال سفارش $orderNo"
         )
     }
 

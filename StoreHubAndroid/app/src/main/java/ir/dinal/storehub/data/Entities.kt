@@ -269,3 +269,66 @@ data class StockSyncQueueEntity(
     val lastError:String?=null,
     val createdAt:Long=System.currentTimeMillis()
 )
+
+@Entity(indices=[Index(value=["channelId","externalOrderId"], unique=true), Index("status"), Index("createdAt")])
+data class ShopOrderEntity(
+    @PrimaryKey(autoGenerate=true) val id:Long=0,
+    val orderNo:String,
+    val channelId:Long,
+    val externalOrderId:String,
+    val externalStatus:String="",
+    val status:String="NEW",
+    val customerName:String?=null,
+    val customerMobile:String?=null,
+    val shippingAddress:String?=null,
+    val total:Double=0.0,
+    val note:String?=null,
+    val createdAt:Long=System.currentTimeMillis(),
+    val importedAt:Long=System.currentTimeMillis(),
+    val reservedAt:Long?=null,
+    val pickedAt:Long?=null,
+    val packedAt:Long?=null,
+    val shippedAt:Long?=null,
+    val cancelledAt:Long?=null
+)
+
+@Entity(indices=[Index("orderId"), Index("productId")])
+data class ShopOrderItemEntity(
+    @PrimaryKey(autoGenerate=true) val id:Long=0,
+    val orderId:Long,
+    val productId:Long=0,
+    val name:String,
+    val sku:String?=null,
+    val externalProductId:String?=null,
+    val externalVariationId:String?=null,
+    val quantity:Double,
+    val unitPrice:Double=0.0,
+    val lineTotal:Double=0.0,
+    val reservedStoreQty:Double=0.0,
+    val waitingDepotQty:Double=0.0,
+    val shortageQty:Double=0.0,
+    val pickedQty:Double=0.0,
+    val packedQty:Double=0.0
+)
+
+@Entity(indices=[Index("status"), Index("createdAt")])
+data class StocktakeSessionEntity(
+    @PrimaryKey(autoGenerate=true) val id:Long=0,
+    val sessionNo:String,
+    val warehouseId:Int,
+    val status:String="OPEN",
+    val note:String?=null,
+    val createdAt:Long=System.currentTimeMillis(),
+    val confirmedAt:Long?=null
+)
+
+@Entity(indices=[Index("sessionId"), Index("productId")])
+data class StocktakeItemEntity(
+    @PrimaryKey(autoGenerate=true) val id:Long=0,
+    val sessionId:Long,
+    val productId:Long,
+    val name:String,
+    val systemQty:Double,
+    val countedQty:Double,
+    val hint:String?=null
+)

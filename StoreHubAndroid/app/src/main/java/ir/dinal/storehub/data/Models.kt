@@ -18,7 +18,9 @@ data class DashboardLocal(
     val purchaseRequired:Int=0,
     val criticalStock:Int=0,
     val unreadAlerts:Int=0,
-    val failedSync:Int=0
+    val failedSync:Int=0,
+    val openOrders:Int=0,
+    val fulfillmentQueue:Int=0
 )
 data class InventoryRow(
     val product:ProductEntity,
@@ -117,7 +119,11 @@ data class BackupPayload(
     val transferSuggestions:List<TransferSuggestionEntity>?=null,
     val purchaseSuggestions:List<PurchaseSuggestionEntity>?=null,
     val audits:List<AuditLogEntity>?=null,
-    val syncQueue:List<StockSyncQueueEntity>?=null
+    val syncQueue:List<StockSyncQueueEntity>?=null,
+    val orders:List<ShopOrderEntity>?=null,
+    val orderItems:List<ShopOrderItemEntity>?=null,
+    val stocktakes:List<StocktakeSessionEntity>?=null,
+    val stocktakeItems:List<StocktakeItemEntity>?=null
 )
 
 data class WooPublishSite(
@@ -196,4 +202,50 @@ data class WooPublishResult(
     val productId:Long?=null,
     val permalink:String?=null,
     val message:String
+)
+
+fun WooPublishSite.toWooSettings() = WooSettings(
+    baseUrl = baseUrl,
+    apiVersion = apiVersion,
+    consumerKey = consumerKey,
+    consumerSecret = consumerSecret,
+    queryStringAuth = queryStringAuth
+)
+
+data class ShopOrderDetails(
+    val order:ShopOrderEntity,
+    val items:List<ShopOrderItemEntity>,
+    val channelName:String
+)
+
+data class StocktakeDetails(
+    val session:StocktakeSessionEntity,
+    val items:List<StocktakeItemEntity>
+)
+
+data class ChannelStockRow(
+    val item:StockSyncQueueEntity,
+    val productName:String,
+    val channelName:String,
+    val mode:String
+)
+
+data class LocalCatalogHit(
+    val product:ProductEntity,
+    val reason:String
+)
+
+data class PhotoPriceHit(
+    val product:ProductEntity,
+    val storeAvailable:Double,
+    val depotAvailable:Double,
+    val kind:String,
+    val note:String
+)
+
+data class PhotoPriceLookup(
+    val hits:List<PhotoPriceHit>,
+    val barcode:String?=null,
+    val usedAi:Boolean=false,
+    val message:String?=null
 )

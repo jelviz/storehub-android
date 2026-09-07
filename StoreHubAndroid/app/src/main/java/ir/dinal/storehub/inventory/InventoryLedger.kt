@@ -64,5 +64,12 @@ object InventoryLedger {
         return apply(current, StockMutation(reservedDelta = -quantity))
     }
 
+    fun fulfillReservation(current: InventorySnapshot, quantity: Double): InventorySnapshot {
+        require(quantity > 0) { "تعداد ارسال باید بیشتر از صفر باشد." }
+        require(current.reserved + 0.000001 >= quantity) { "رزرو کافی برای ارسال نیست." }
+        require(current.onHand + 0.000001 >= quantity) { "موجودی روی قفسه برای ارسال کافی نیست." }
+        return apply(current, StockMutation(onHandDelta = -quantity, reservedDelta = -quantity))
+    }
+
     fun versionsConflict(expected: Long, actual: Long): Boolean = expected != actual
 }
