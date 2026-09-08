@@ -1,10 +1,13 @@
 package ir.dinal.storehub.ui
 
 import android.app.Activity
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -13,6 +16,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import ir.dinal.storehub.data.*
@@ -31,8 +36,10 @@ fun PosScreen(activity: Activity, nav: NavHostController) {
     var customer by remember { mutableStateOf("") }
     var mobile by remember { mutableStateOf("") }
     var payment by remember { mutableIntStateOf(2) }
+    var checkoutOpen by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    val total = cart.sumOf { it.product.price * it.quantity }
 
     val posEntry = remember(nav) { nav.getBackStackEntry("pos") }
     val scanResult by posEntry.savedStateHandle.getStateFlow("scan_result", "").collectAsState()
@@ -76,127 +83,167 @@ fun PosScreen(activity: Activity, nav: NavHostController) {
 
     DinalScreen(nav, "صندوق فروش", showBack = false) { pad ->
         Column(
-            Modifier.padding(pad).fillMaxSize().imePadding().padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            Modifier.padding(pad).fillMaxSize().padding(horizontal = 14.dp, top = 8.dp, bottom = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            DinalHero("فروش سریع", "جستجو، اسکن، عکس یا کد کالا؛ موجودی فقط از فروشگاه کم می‌شود") {
-                Icon(Icons.Rounded.PointOfSale, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(42.dp))
-            }
-
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = code,
-                    onValueChange = { code = it },
-                    label = { Text("بارکد / SKU") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    trailingIcon = { Icon(Icons.Rounded.Search, null) }
-                )
-                FilledTonalIconButton(onClick = { lookup(code) }) { Icon(Icons.Rounded.AddShoppingCart, "افزودن") }
-                Button(onClick = { nav.navigate("scanner") }, contentPadding = PaddingValues(horizontal = 14.dp, vertical = 14.dp)) {
-                    Icon(Icons.Rounded.QrCodeScanner, null); Spacer(Modifier.width(5.dp)); Text("اسکن")
+            if (!checkoutOpen) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = code,
+                        onValueChange = { code = it },
+                        label = { Text("بارکد / SKU") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        trailingIcon = { Icon(Icons.Rounded.Search, null) }
+                    )
+                    FilledTonalIconButton(onClick = { lookup(code) }) { Icon(Icons.Rounded.AddShoppingCart, "افزودن") }
+                    FilledTonalIconButton(onClick = { nav.navigate("scanner") }) { Icon(Icons.Rounded.QrCodeScanner, "اسکن") }
+                    FilledTonalIconButton(onClick = { nav.navigate("photo_price") }) { Icon(Icons.Rounded.PhotoCamera, "قیمت با عکس") }
                 }
-            }
-            OutlinedButton(onClick = { nav.navigate("photo_price") }, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Rounded.PhotoCamera, null); Spacer(Modifier.width(6.dp)); Text("قیمت با عکس — برای مشتری حضوری")
-            }
 
-            OutlinedTextField(
-                value = nameQuery,
-                onValueChange = { nameQuery = it },
-                label = { Text("جستجو با نام / دسته") },
-                leadingIcon = { Icon(Icons.Rounded.Search, null) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-            if (nameQuery.isNotBlank() && products.isNotEmpty()) {
-                products.take(8).forEach { p ->
-                    Surface(onClick = { addProduct(p); nameQuery = "" }, shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .6f)) {
-                        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            ProductThumb(p, size = 40.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text(p.name, Modifier.weight(1f), fontWeight = FontWeight.SemiBold, maxLines = 1)
-                            Icon(Icons.Rounded.Add, null)
+                OutlinedTextField(
+                    value = nameQuery,
+                    onValueChange = { nameQuery = it },
+                    label = { Text("جستجو با نام / دسته") },
+                    leadingIcon = { Icon(Icons.Rounded.Search, null) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                if (nameQuery.isNotBlank() && products.isNotEmpty()) {
+                    products.take(6).forEach { p ->
+                        Surface(onClick = { addProduct(p); nameQuery = "" }, shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .6f)) {
+                            Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                ProductThumb(p, size = 40.dp)
+                                Spacer(Modifier.width(8.dp))
+                                Text(p.name, Modifier.weight(1f), fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                Icon(Icons.Rounded.Add, null)
+                            }
                         }
                     }
                 }
-            }
 
-            ErrorText(msg)
-            Busy(busy)
+                ErrorText(msg)
+                Busy(busy)
 
-            if (cart.isEmpty()) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    shape = RoundedCornerShape(22.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f)
-                ) {
-                    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                        Icon(Icons.Rounded.ShoppingBasket, null, modifier = Modifier.size(60.dp), tint = MaterialTheme.colorScheme.outline)
-                        Spacer(Modifier.height(10.dp))
-                        Text("سبد فروش خالی است", fontWeight = FontWeight.SemiBold)
-                        Text("بارکد را اسکن کن یا کد کالا را وارد کن", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (cart.isEmpty()) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        shape = RoundedCornerShape(22.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f)
+                    ) {
+                        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            Icon(Icons.Rounded.ShoppingBasket, null, modifier = Modifier.size(60.dp), tint = MaterialTheme.colorScheme.outline)
+                            Spacer(Modifier.height(10.dp))
+                            Text("سبد فروش خالی است", fontWeight = FontWeight.SemiBold)
+                            Text("بارکد را اسکن کن یا کد کالا را وارد کن", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(bottom = 8.dp)
+                    ) {
+                        items(cart, key = { it.product.id }) { line ->
+                            Card(shape = RoundedCornerShape(18.dp)) {
+                                Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    ProductThumb(line.product, size = 58.dp)
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(line.product.name, fontWeight = FontWeight.Bold, maxLines = 2)
+                                        Text("${toman(line.product.price)} × ${line.quantity}", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(onClick = {
+                                            val i = cart.indexOfFirst { it.product.id == line.product.id }
+                                            if (i >= 0 && cart[i].quantity > 1) cart[i] = cart[i].copy(quantity = cart[i].quantity - 1)
+                                            else if (i >= 0) cart.removeAt(i)
+                                        }) { Icon(Icons.Rounded.RemoveCircleOutline, "کم کردن") }
+                                        Text(line.quantity.toInt().toString(), fontWeight = FontWeight.Bold)
+                                        IconButton(onClick = {
+                                            val i = cart.indexOfFirst { it.product.id == line.product.id }
+                                            if (i >= 0) cart[i] = cart[i].copy(quantity = cart[i].quantity + 1)
+                                        }) { Icon(Icons.Rounded.AddCircleOutline, "زیاد کردن") }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Surface(shape = RoundedCornerShape(20.dp), tonalElevation = 3.dp) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("جمع کل", fontWeight = FontWeight.SemiBold)
+                            Text(toman(total), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = { msg = null; checkoutOpen = true },
+                            enabled = cart.isNotEmpty() && !busy,
+                            modifier = Modifier.fillMaxWidth().height(56.dp)
+                        ) {
+                            Icon(Icons.Rounded.ShoppingCart, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("خرید", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             } else {
-                LazyColumn(
-                    Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(bottom = 8.dp)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { checkoutOpen = false }, contentPadding = PaddingValues(horizontal = 4.dp)) {
+                        Text("سبد")
+                    }
+                    Text("تسویه", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(toman(total), fontWeight = FontWeight.Bold)
+                }
+                OutlinedTextField(
+                    value = customer,
+                    onValueChange = { customer = it },
+                    label = { Text("نام خریدار") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
+                )
+                OutlinedTextField(
+                    value = mobile,
+                    onValueChange = { mobile = it },
+                    label = { Text("موبایل") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Done)
+                )
+                Text("روش پرداخت", fontWeight = FontWeight.SemiBold)
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(cart, key = { it.product.id }) { line ->
-                        Card(shape = RoundedCornerShape(18.dp)) {
-                            Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                ProductThumb(line.product, size = 58.dp)
-                                Spacer(Modifier.width(10.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text(line.product.name, fontWeight = FontWeight.Bold, maxLines = 2)
-                                    Text("${toman(line.product.price)} × ${line.quantity}", style = MaterialTheme.typography.bodySmall)
-                                }
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    IconButton(onClick = {
-                                        val i = cart.indexOfFirst { it.product.id == line.product.id }
-                                        if (i >= 0 && cart[i].quantity > 1) cart[i] = cart[i].copy(quantity = cart[i].quantity - 1)
-                                        else if (i >= 0) cart.removeAt(i)
-                                    }) { Icon(Icons.Rounded.RemoveCircleOutline, "کم کردن") }
-                                    Text(line.quantity.toInt().toString(), fontWeight = FontWeight.Bold)
-                                    IconButton(onClick = {
-                                        val i = cart.indexOfFirst { it.product.id == line.product.id }
-                                        if (i >= 0) cart[i] = cart[i].copy(quantity = cart[i].quantity + 1)
-                                    }) { Icon(Icons.Rounded.AddCircleOutline, "زیاد کردن") }
-                                }
-                            }
-                        }
+                    linkedMapOf(1 to "نقدی", 2 to "کارتخوان", 3 to "اقساطی", 4 to "ترکیبی", 5 to "سایر").forEach { (id, name) ->
+                        FilterChip(selected = payment == id, onClick = { payment = id }, label = { Text(name) })
                     }
                 }
-            }
-
-            Surface(shape = RoundedCornerShape(20.dp), tonalElevation = 2.dp) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("جمع کل", fontWeight = FontWeight.SemiBold)
-                        Text(toman(cart.sumOf { it.product.price * it.quantity }), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    }
-                    PaymentPicker(payment) { payment = it }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(customer, { customer = it }, label = { Text("نام مشتری") }, modifier = Modifier.weight(1f), singleLine = true)
-                        OutlinedTextField(mobile, { mobile = it }, label = { Text("موبایل") }, modifier = Modifier.weight(1f), singleLine = true)
-                    }
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                busy = true; msg = null
-                                runCatching { store.checkout(cart.toList(), payment, customer, mobile) }
-                                    .onSuccess { id -> cart.clear(); customer = ""; mobile = ""; msg = "فروش با شماره داخلی $id ثبت شد." }
-                                    .onFailure { msg = it.message }
-                                busy = false
-                            }
-                        },
-                        enabled = cart.isNotEmpty() && !busy,
-                        modifier = Modifier.fillMaxWidth().height(52.dp)
-                    ) {
-                        Icon(Icons.Rounded.Done, null); Spacer(Modifier.width(6.dp)); Text("ثبت فروش و کسر موجودی")
-                    }
+                ErrorText(msg)
+                Busy(busy)
+                Spacer(Modifier.weight(1f))
+                Button(
+                    onClick = {
+                        scope.launch {
+                            busy = true; msg = null
+                            runCatching { store.checkout(cart.toList(), payment, customer, mobile) }
+                                .onSuccess { id ->
+                                    cart.clear(); customer = ""; mobile = ""; checkoutOpen = false
+                                    msg = "فروش با شماره داخلی $id ثبت شد."
+                                }
+                                .onFailure { msg = it.message }
+                            busy = false
+                        }
+                    },
+                    enabled = cart.isNotEmpty() && !busy,
+                    modifier = Modifier.fillMaxWidth().height(56.dp)
+                ) {
+                    Icon(Icons.Rounded.Done, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("ثبت فروش", fontWeight = FontWeight.Bold)
                 }
             }
         }

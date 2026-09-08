@@ -41,6 +41,7 @@ private val bottomItems = listOf(
     BottomItem("more", "بیشتر", Icons.Rounded.GridView)
 )
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun StoreHubRoot(activity: Activity, onSplashFinished: () -> Unit = {}) {
     DinalTheme {
@@ -57,7 +58,8 @@ fun StoreHubRoot(activity: Activity, onSplashFinished: () -> Unit = {}) {
             val nav = rememberNavController()
             val entry by nav.currentBackStackEntryAsState()
             val route = entry?.destination?.route
-            val showBottom = bottomItems.any { it.route == route }
+            val imeVisible = WindowInsets.isImeVisible
+            val showBottom = bottomItems.any { it.route == route } && !imeVisible
 
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
