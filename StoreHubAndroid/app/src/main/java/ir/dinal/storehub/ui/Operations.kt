@@ -96,6 +96,27 @@ fun PurchasesScreen(nav: NavHostController) {
     var note by remember { mutableStateOf("") }
     var err by remember { mutableStateOf<String?>(null) }
     var showForm by remember { mutableStateOf(false) }
+    var editingPurchaseId by remember { mutableLongStateOf(0L) }
+
+    fun clearPurchaseForm() {
+        editingPurchaseId = 0L
+        draft.clear(); supplier = ""; mobile = ""; invoiceNo = ""; date = todayPersian()
+        warehouse = LocalStore.WAREHOUSE_DEPOT; payment = 2; note = ""; qty = ""; cost = ""
+    }
+    fun openPurchaseEditor(d: PurchaseDetails) {
+        if (d.purchase.status != 1) return
+        editingPurchaseId = d.purchase.id
+        supplier = d.supplier?.name ?: d.purchase.supplierName.orEmpty()
+        mobile = d.purchase.supplierMobile.orEmpty()
+        invoiceNo = d.purchase.invoiceNumber.orEmpty()
+        date = d.purchase.purchaseDatePersian
+        warehouse = d.purchase.warehouseId
+        payment = d.purchase.paymentType
+        note = d.purchase.note.orEmpty()
+        draft.clear()
+        d.items.forEach { draft.add(PurchaseLineDraft(it.productId, it.name, it.quantity, it.unitCost)) }
+        showForm = true; err = null
+    }
 
     suspend fun load() {
         products = store.products()
@@ -105,7 +126,9 @@ fun PurchasesScreen(nav: NavHostController) {
     LaunchedEffect(Unit) { load() }
 
     DinalScreen(nav, "خریدهای بازار", floatingActionButton = {
-        FloatingActionButton(onClick = { showForm = !showForm }) { Icon(if (showForm) Icons.Rounded.Close else Icons.Rounded.Add, null) }
+        FloatingActionButton(onClick = { if (showForm) { showForm = false; clearPurchaseForm() } else showForm = true }) {
+            Icon(if (showForm) Icons.Rounded.Close else Icons.Rounded.Add, null)
+        }
     }) { pad ->
         LazyColumn(
             Modifier.padding(pad).fillMaxSize().imePadding(),
@@ -113,7 +136,7 @@ fun PurchasesScreen(nav: NavHostController) {
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             if (showForm) item {
-                SectionCard("ثبت خرید") {
+                SectionCard(if (editingPurchaseId > 0L) "ویرایش خرید" else "ثبت خرید") {
                     OutlinedTextField(supplier, { supplier = it }, label = { Text("فروشنده / تأمین‌کننده") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     OutlinedTextField(mobile, { mobile = it }, label = { Text("موبایل فروشنده") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     OutlinedTextField(invoiceNo, { invoiceNo = it }, label = { Text("شماره فاکتور (اختیاری)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
@@ -147,9 +170,21 @@ fun PurchasesScreen(nav: NavHostController) {
                     Text("جمع خرید: ${toman(draft.sumOf { it.quantity * it.unitCost })}", fontWeight = FontWeight.Bold)
                     ErrorText(err)
                     Button(
-                        onClick = { scope.launch { runCatching { store.createPurchase(supplier, mobile, date, warehouse, payment, note, draft.toList(), invoiceNo) }.onSuccess { draft.clear(); supplier = ""; mobile = ""; invoiceNo = ""; note = ""; showForm = false; load() }.onFailure { err = it.message } } },
+                        onClick = {
+                            scope.launch {
+                                val action = if (editingPurchaseId > 0L) {
+                                    store.updatePurchase(editingPurchaseId, supplier, mobile, date, warehouse, payment, note, draft.toList(), invoiceNo)
+                                } else {
+                                    store.createPurchase(supplier, mobile, date, warehouse, payment, note, draft.toList(), invoiceNo)
+                                }
+                                runCatching { action }
+                                    .onSuccess { clearPurchaseForm(); showForm = false; load() }
+                                    .onFailure { err = it.message }
+                            }
+                        },
                         enabled = draft.isNotEmpty(), modifier = Modifier.fillMaxWidth()
-                    ) { Text("ثبت خرید") }
+                    ) { Text(if (editingPurchaseId > 0L) "ذخیره تغییرات" else "ثبت خرید") }
+                    if (editingPurchaseId > 0L) TextButton(onClick = { clearPurchaseForm() }, modifier = Modifier.fillMaxWidth()) { Text("انصراف از ویرایش") }
                 }
             }
             items(purchases, key = { it.purchase.id }) { d ->
@@ -164,7 +199,14 @@ fun PurchasesScreen(nav: NavHostController) {
                         d.purchase.invoiceNumber?.let { Text("فاکتور $it", style = MaterialTheme.typography.bodySmall) }
                         d.items.take(4).forEach { Text("${it.name}: ${it.quantity} × ${toman(it.unitCost)}", style = MaterialTheme.typography.bodySmall) }
                         if (d.purchase.status == 1) {
-                            Button({ scope.launch { runCatching { store.receivePurchase(d.purchase.id) }.onSuccess { load() }.onFailure { err = it.message } } }, Modifier.fillMaxWidth()) { Text("دریافت کالا و افزایش موجودی") }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = { openPurchaseEditor(d) }, modifier = Modifier.weight(1f)) {
+                                    Icon(Icons.Rounded.Edit, null); Spacer(Modifier.width(4.dp)); Text("ویرایش")
+                                }
+                                Button({ scope.launch { runCatching { store.receivePurchase(d.purchase.id) }.onSuccess { load() }.onFailure { err = it.message } } }, Modifier.weight(1f)) {
+                                    Text("دریافت")
+                                }
+                            }
                         } else AssistChip(onClick = {}, label = { Text("دریافت‌شده") }, leadingIcon = { Icon(Icons.Rounded.CheckCircle, null, Modifier.size(16.dp)) })
                     }
                 }

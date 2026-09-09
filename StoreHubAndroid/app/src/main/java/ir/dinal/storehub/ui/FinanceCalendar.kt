@@ -123,7 +123,21 @@ fun ChecksScreen(nav: NavHostController) {
     var note by remember { mutableStateOf("") }
     var err by remember { mutableStateOf<String?>(null) }
     var showForm by remember { mutableStateOf(false) }
+    var editingId by remember { mutableLongStateOf(0L) }
+    var editingStatus by remember { mutableIntStateOf(1) }
     var selectedYear by remember { mutableIntStateOf(Jalali.today().year) }
+
+    fun clearCheckForm() {
+        editingId = 0L; editingStatus = 1
+        title = ""; bank = ""; number = ""; payee = ""; amount = ""; due = todayPersian(); reminder = "3"; note = ""
+    }
+    fun openCheckEditor(c: IssuedCheckEntity) {
+        editingId = c.id; editingStatus = c.status
+        title = c.title; bank = c.bankName.orEmpty(); number = c.checkNumber.orEmpty()
+        payee = c.payee.orEmpty(); amount = money(c.amount); due = c.dueDatePersian
+        reminder = c.reminderDaysBefore.toString(); note = c.note.orEmpty()
+        showForm = true; err = null
+    }
 
     suspend fun load() { list = store.checks() }
     LaunchedEffect(Unit) { load() }
@@ -138,7 +152,9 @@ fun ChecksScreen(nav: NavHostController) {
     }
 
     DinalScreen(nav, "چک‌ها و سررسید", floatingActionButton = {
-        FloatingActionButton(onClick = { showForm = !showForm }) { Icon(if (showForm) Icons.Rounded.Close else Icons.Rounded.Add, null) }
+        FloatingActionButton(onClick = { if (showForm) { showForm = false; clearCheckForm() } else showForm = true }) {
+            Icon(if (showForm) Icons.Rounded.Close else Icons.Rounded.Add, null)
+        }
     }) { pad ->
         LazyColumn(
             Modifier.padding(pad).fillMaxSize().imePadding(),
@@ -151,7 +167,7 @@ fun ChecksScreen(nav: NavHostController) {
                 }
             }
             if (showForm) item {
-                SectionCard("ثبت چک جدید") {
+                SectionCard(if (editingId > 0L) "ویرایش چک" else "ثبت چک جدید") {
                     OutlinedTextField(title, { title = it }, label = { Text("عنوان") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(bank, { bank = it }, label = { Text("بانک") }, modifier = Modifier.weight(1f), singleLine = true)
@@ -167,15 +183,16 @@ fun ChecksScreen(nav: NavHostController) {
                         onClick = {
                             scope.launch {
                                 runCatching {
-                                    store.saveCheck(title = title, bank = bank, number = number, payee = payee, amount = parseToman(amount), duePersian = due, reminderDays = reminder.toIntOrNull() ?: 3, note = note)
+                                    store.saveCheck(id = editingId, title = title, bank = bank, number = number, payee = payee, amount = parseToman(amount), duePersian = due, reminderDays = reminder.toIntOrNull() ?: 3, status = editingStatus, note = note)
                                 }.onSuccess {
-                                    title = ""; bank = ""; number = ""; payee = ""; amount = ""; note = ""; showForm = false; load()
+                                    clearCheckForm(); showForm = false; load()
                                 }.onFailure { err = it.message }
                             }
                         },
                         enabled = title.isNotBlank(),
                         modifier = Modifier.fillMaxWidth().height(50.dp)
-                    ) { Icon(Icons.Rounded.NotificationsActive, null); Spacer(Modifier.width(6.dp)); Text("ثبت و فعال‌کردن یادآوری") }
+                    ) { Icon(Icons.Rounded.NotificationsActive, null); Spacer(Modifier.width(6.dp)); Text(if (editingId > 0L) "ذخیره تغییرات" else "ثبت و فعال‌کردن یادآوری") }
+                    if (editingId > 0L) TextButton(onClick = { clearCheckForm() }, modifier = Modifier.fillMaxWidth()) { Text("انصراف از ویرایش") }
                 }
             }
 
@@ -217,8 +234,11 @@ fun ChecksScreen(nav: NavHostController) {
                         Text("اعلان ${c.reminderDaysBefore} روز قبل", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         val status = when (c.status) { 1 -> "باز"; 2 -> "پاس‌شده"; 3 -> "برگشتی"; 4 -> "لغوشده"; else -> "نامشخص" }
                         AssistChip(onClick = {}, label = { Text(status) })
-                        if (c.status == 1) {
-                            Row {
+                        Row {
+                            TextButton(onClick = { openCheckEditor(c) }) {
+                                Icon(Icons.Rounded.Edit, null); Spacer(Modifier.width(4.dp)); Text("ویرایش")
+                            }
+                            if (c.status == 1) {
                                 TextButton({ scope.launch { store.setCheckStatus(c.id, 2); load() } }) { Text("پاس شد") }
                                 TextButton({ scope.launch { store.setCheckStatus(c.id, 3); load() } }) { Text("برگشتی") }
                                 TextButton({ scope.launch { store.setCheckStatus(c.id, 4); load() } }) { Text("لغو") }
@@ -247,12 +267,28 @@ fun AppointmentsScreen(nav: NavHostController) {
     var note by remember { mutableStateOf("") }
     var err by remember { mutableStateOf<String?>(null) }
     var showForm by remember { mutableStateOf(false) }
+    var editingId by remember { mutableLongStateOf(0L) }
+    var editingStatus by remember { mutableIntStateOf(1) }
+
+    fun clearAppointmentForm() {
+        editingId = 0L; editingStatus = 1
+        title = ""; person = ""; mobile = ""; location = ""; date = todayPersian(); time = "12:00"; reminder = "60"; note = ""
+    }
+    fun openAppointmentEditor(a: AppointmentEntity) {
+        editingId = a.id; editingStatus = a.status
+        title = a.title; person = a.personName.orEmpty(); mobile = a.mobile.orEmpty()
+        location = a.location.orEmpty(); date = a.datePersian; time = a.time
+        reminder = a.reminderMinutesBefore.toString(); note = a.note.orEmpty()
+        showForm = true; err = null
+    }
 
     suspend fun load() { list = store.appointments() }
     LaunchedEffect(Unit) { load() }
 
     DinalScreen(nav, "قرارها", floatingActionButton = {
-        FloatingActionButton(onClick = { showForm = !showForm }) { Icon(if (showForm) Icons.Rounded.Close else Icons.Rounded.Add, null) }
+        FloatingActionButton(onClick = { if (showForm) { showForm = false; clearAppointmentForm() } else showForm = true }) {
+            Icon(if (showForm) Icons.Rounded.Close else Icons.Rounded.Add, null)
+        }
     }) { pad ->
         LazyColumn(
             Modifier.padding(pad).fillMaxSize().imePadding(),
@@ -265,7 +301,7 @@ fun AppointmentsScreen(nav: NavHostController) {
                 }
             }
             if (showForm) item {
-                SectionCard("قرار جدید") {
+                SectionCard(if (editingId > 0L) "ویرایش قرار" else "قرار جدید") {
                     OutlinedTextField(title, { title = it }, label = { Text("عنوان") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(person, { person = it }, label = { Text("نام شخص") }, modifier = Modifier.weight(1f), singleLine = true)
@@ -282,14 +318,16 @@ fun AppointmentsScreen(nav: NavHostController) {
                     Button(
                         onClick = {
                             scope.launch {
-                                runCatching { store.saveAppointment(title = title, person = person, mobile = mobile, location = location, datePersian = date, time = time, reminderMinutes = reminder.toIntOrNull() ?: 60, note = note) }
-                                    .onSuccess { title = ""; person = ""; mobile = ""; location = ""; note = ""; showForm = false; load() }
+                                runCatching {
+                                    store.saveAppointment(id = editingId, title = title, person = person, mobile = mobile, location = location, datePersian = date, time = time, reminderMinutes = reminder.toIntOrNull() ?: 60, status = editingStatus, note = note)
+                                }.onSuccess { clearAppointmentForm(); showForm = false; load() }
                                     .onFailure { err = it.message }
                             }
                         },
                         enabled = title.isNotBlank(),
                         modifier = Modifier.fillMaxWidth().height(50.dp)
-                    ) { Icon(Icons.Rounded.NotificationsActive, null); Spacer(Modifier.width(6.dp)); Text("ثبت قرار و یادآوری") }
+                    ) { Icon(Icons.Rounded.NotificationsActive, null); Spacer(Modifier.width(6.dp)); Text(if (editingId > 0L) "ذخیره تغییرات" else "ثبت قرار و یادآوری") }
+                    if (editingId > 0L) TextButton(onClick = { clearAppointmentForm() }, modifier = Modifier.fillMaxWidth()) { Text("انصراف از ویرایش") }
                 }
             }
             if (list.isEmpty()) item { SectionCard("قراری ثبت نشده") { Text("با دکمه + یک قرار جدید بساز.") } }
@@ -301,8 +339,14 @@ fun AppointmentsScreen(nav: NavHostController) {
                         val extra = listOfNotNull(a.personName, a.location).filter { it.isNotBlank() }.joinToString(" • ")
                         if (extra.isNotBlank()) Text(extra)
                         Text("اعلان ${a.reminderMinutesBefore} دقیقه قبل", style = MaterialTheme.typography.bodySmall)
-                        if (a.status == 1) TextButton({ scope.launch { store.setAppointmentStatus(a.id, 2); load() } }) { Icon(Icons.Rounded.Done, null); Spacer(Modifier.width(5.dp)); Text("انجام شد") }
-                        else AssistChip(onClick = {}, label = { Text("انجام‌شده") })
+                        Row {
+                            TextButton(onClick = { openAppointmentEditor(a) }) {
+                                Icon(Icons.Rounded.Edit, null); Spacer(Modifier.width(4.dp)); Text("ویرایش")
+                            }
+                            if (a.status == 1) TextButton({ scope.launch { store.setAppointmentStatus(a.id, 2); load() } }) {
+                                Icon(Icons.Rounded.Done, null); Spacer(Modifier.width(5.dp)); Text("انجام شد")
+                            } else AssistChip(onClick = {}, label = { Text("انجام‌شده") })
+                        }
                     }
                 }
             }

@@ -278,6 +278,42 @@ fun ProductThumb(product: ProductEntity, modifier: Modifier = Modifier, size: an
 @Composable fun Busy(b: Boolean) { if (b) LinearProgressIndicator(Modifier.fillMaxWidth()) }
 
 @Composable
+fun ProductMatchRow(
+    product: ProductEntity,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    kindLabel: String? = null,
+    note: String? = null
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .55f)
+        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .45f),
+        border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = .45f)) else null
+    ) {
+        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            ProductThumb(product, size = 56.dp)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(product.name, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (!kindLabel.isNullOrBlank()) {
+                    AssistChip(onClick = {}, label = { Text(kindLabel) }, modifier = Modifier.height(28.dp))
+                }
+                if (!note.isNullOrBlank()) {
+                    Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                }
+                product.sku?.takeIf { it.isNotBlank() }?.let {
+                    Text("SKU: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun ProductPicker(products: List<ProductEntity>, selected: Long, onSelect: (Long) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val product = products.firstOrNull { it.id == selected }

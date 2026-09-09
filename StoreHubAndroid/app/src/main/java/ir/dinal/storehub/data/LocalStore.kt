@@ -216,6 +216,18 @@ class LocalStore private constructor(private val context:Context){
         val id=dao.insertPurchase(PurchaseEntity(purchaseNo="P-${System.currentTimeMillis()}",supplierName=supplier?.ifBlank{null},supplierMobile=mobile?.ifBlank{null},purchaseDatePersian=datePersian,warehouseId=warehouseId,paymentType=paymentType,total=total,note=note,supplierId=supplierId,invoiceNumber=invoiceNumber?.ifBlank{null}))
         dao.insertPurchaseItems(items.map{PurchaseItemEntity(purchaseId=id,productId=it.productId,name=it.name,quantity=it.quantity,unitCost=it.unitCost,lineTotal=it.quantity*it.unitCost)});id
     }
+    suspend fun updatePurchase(id:Long,supplier:String?,mobile:String?,datePersian:String,warehouseId:Int,paymentType:Int,note:String?,items:List<PurchaseLineDraft>,invoiceNumber:String?=null)=db.withTransaction{
+        val p=dao.purchase(id)?:error("خرید پیدا نشد.")
+        require(p.status==1){"خرید دریافت‌شده قابل ویرایش نیست."}
+        require(Jalali.parse(datePersian)!=null){"تاریخ خرید نامعتبر است."}
+        require(items.isNotEmpty()){"حداقل یک کالا اضافه کن."}
+        val supplierId=upsertSupplier(supplier, mobile)
+        val total=items.sumOf{it.quantity*it.unitCost}
+        dao.updatePurchase(p.copy(supplierName=supplier?.ifBlank{null},supplierMobile=mobile?.ifBlank{null},purchaseDatePersian=datePersian,warehouseId=warehouseId,paymentType=paymentType,total=total,note=note,supplierId=supplierId,invoiceNumber=invoiceNumber?.ifBlank{null}))
+        dao.deletePurchaseItems(id)
+        dao.insertPurchaseItems(items.map{PurchaseItemEntity(purchaseId=id,productId=it.productId,name=it.name,quantity=it.quantity,unitCost=it.unitCost,lineTotal=it.quantity*it.unitCost)})
+        id
+    }
     suspend fun receivePurchase(id:Long)=db.withTransaction{
         val p=dao.purchase(id)?:error("خرید پیدا نشد");require(p.status==1){"این خرید قبلاً دریافت شده است."}
         dao.purchaseItems(id).forEach{
@@ -350,6 +362,20 @@ class LocalStore private constructor(private val context:Context){
             dao.updateStocktakeItem(existing.copy(countedQty=counted, systemQty=system, hint=hint?:existing.hint))
             existing.id
         }else dao.insertStocktakeItem(StocktakeItemEntity(sessionId=sessionId, productId=productId, name=product.name, systemQty=system, countedQty=counted, hint=hint))
+    }
+    suspend fun updateStocktakeItemQty(itemId:Long, counted:Double)=db.withTransaction{
+        require(counted>=0){"تعداد نامعتبر است."}
+        val item=dao.stocktakeItemById(itemId)?:error("قلم شمارش پیدا نشد.")
+        val session=dao.stocktake(item.sessionId)?:error("انبارگردانی پیدا نشد.")
+        require(session.status==StocktakeStatus.OPEN){"این شمارش تأیید شده و قابل ویرایش نیست."}
+        val system=inventory.snapshot(item.productId, session.warehouseId).onHand
+        dao.updateStocktakeItem(item.copy(countedQty=counted, systemQty=system))
+    }
+    suspend fun removeStocktakeItem(itemId:Long)=db.withTransaction{
+        val item=dao.stocktakeItemById(itemId)?:error("قلم شمارش پیدا نشد.")
+        val session=dao.stocktake(item.sessionId)?:error("انبارگردانی پیدا نشد.")
+        require(session.status==StocktakeStatus.OPEN){"این شمارش تأیید شده و قابل ویرایش نیست."}
+        dao.deleteStocktakeItem(itemId)
     }
     suspend fun confirmStocktake(sessionId:Long)=db.withTransaction{
         val session=dao.stocktake(sessionId)?:error("انبارگردانی پیدا نشد.")

@@ -72,6 +72,7 @@ interface StoreHubDao {
 
     @Insert suspend fun insertPurchase(p:PurchaseEntity):Long
     @Update suspend fun updatePurchase(p:PurchaseEntity)
+    @Query("DELETE FROM PurchaseItemEntity WHERE purchaseId=:purchaseId") suspend fun deletePurchaseItems(purchaseId:Long)
     @Query("SELECT * FROM PurchaseEntity ORDER BY createdAt DESC") suspend fun purchases():List<PurchaseEntity>
     @Query("SELECT * FROM PurchaseEntity") suspend fun allPurchases():List<PurchaseEntity>
     @Query("SELECT * FROM PurchaseEntity WHERE id=:id") suspend fun purchase(id:Long):PurchaseEntity?
@@ -192,6 +193,8 @@ interface StoreHubDao {
     @Query("SELECT * FROM StocktakeItemEntity WHERE sessionId=:sessionId ORDER BY id") suspend fun stocktakeItems(sessionId:Long):List<StocktakeItemEntity>
     @Query("SELECT * FROM StocktakeItemEntity") suspend fun allStocktakeItems():List<StocktakeItemEntity>
     @Query("SELECT * FROM StocktakeItemEntity WHERE sessionId=:sessionId AND productId=:productId LIMIT 1") suspend fun stocktakeItem(sessionId:Long, productId:Long):StocktakeItemEntity?
+    @Query("SELECT * FROM StocktakeItemEntity WHERE id=:id LIMIT 1") suspend fun stocktakeItemById(id:Long):StocktakeItemEntity?
+    @Query("DELETE FROM StocktakeItemEntity WHERE id=:id") suspend fun deleteStocktakeItem(id:Long)
     @Update suspend fun updateStocktakeItem(item:StocktakeItemEntity)
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun restoreStocktakes(items:List<StocktakeSessionEntity>)
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun restoreStocktakeItems(items:List<StocktakeItemEntity>)
