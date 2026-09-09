@@ -83,7 +83,7 @@ fun PosScreen(activity: Activity, nav: NavHostController) {
 
     DinalScreen(nav, "صندوق فروش", showBack = false) { pad ->
         Column(
-            Modifier.padding(pad).fillMaxSize().padding(horizontal = 14.dp, top = 8.dp, bottom = 6.dp),
+            Modifier.padding(pad).fillMaxSize().padding(start = 14.dp, top = 8.dp, end = 14.dp, bottom = 6.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (!checkoutOpen) {
