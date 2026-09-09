@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -41,7 +42,6 @@ private val bottomItems = listOf(
     BottomItem("more", "بیشتر", Icons.Rounded.GridView)
 )
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun StoreHubRoot(activity: Activity, onSplashFinished: () -> Unit = {}) {
     DinalTheme {
@@ -58,7 +58,8 @@ fun StoreHubRoot(activity: Activity, onSplashFinished: () -> Unit = {}) {
             val nav = rememberNavController()
             val entry by nav.currentBackStackEntryAsState()
             val route = entry?.destination?.route
-            val imeVisible = WindowInsets.isImeVisible
+            val density = LocalDensity.current
+            val imeVisible = WindowInsets.ime.getBottom(density) > 0
             val showBottom = bottomItems.any { it.route == route } && !imeVisible
 
             Scaffold(

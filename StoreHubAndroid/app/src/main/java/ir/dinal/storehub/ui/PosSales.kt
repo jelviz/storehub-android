@@ -194,7 +194,12 @@ fun PosScreen(activity: Activity, nav: NavHostController) {
                     TextButton(onClick = { checkoutOpen = false }, contentPadding = PaddingValues(horizontal = 4.dp)) {
                         Text("سبد")
                     }
-                    Text("تسویه", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "تسویه",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
                     Text(toman(total), fontWeight = FontWeight.Bold)
                 }
                 OutlinedTextField(
